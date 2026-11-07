@@ -2,13 +2,15 @@
 # Build a 3D turbo short: voice-over -> 3D render -> mp4.
 #   ./build.sh          "How a Turbo Works"
 #   ./build.sh lag      "Turbo lag, twin-scroll and anti-lag"
+#   ./build.sh sc       "Supercharger vs turbo"
 set -euo pipefail
 cd "$(dirname "$0")"
 STORY=${1:-turbo}
 case "$STORY" in
   turbo) NAME=how_a_turbo_works ;;
   lag)   NAME=turbo_lag_twin_scroll_anti_lag ;;
-  *) echo "unknown story: $STORY (turbo|lag)"; exit 1 ;;
+  sc)    NAME=supercharger_vs_turbo ;;
+  *) echo "unknown story: $STORY (turbo|lag|sc)"; exit 1 ;;
 esac
 ROOT=${BUILD:-build}
 BUILD=$ROOT/$STORY

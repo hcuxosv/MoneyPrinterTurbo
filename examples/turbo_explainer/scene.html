@@ -48,6 +48,14 @@
   #throttle #thrfill { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: linear-gradient(#4dff88, #19c25a); }
   #throttle .t { font-size: 30px; letter-spacing: 2px; }
   #throttle #thrv { font-size: 64px; color: #4dff88; display: block; margin-top: 6px; }
+  #wipe {
+    position: absolute; top: -10%; bottom: -10%; left: 0; width: 170%; display: none;
+    background: linear-gradient(90deg, #ff6a1a, #ffb020 30%, #ffb020 70%, #ff6a1a);
+  }
+  #wipetext {
+    position: absolute; top: 46%; left: 0; right: 0; text-align: center; opacity: 0;
+    color: #0b0f16; font-weight: 900; font-size: 128px; letter-spacing: -3px;
+  }
   #progress { position: absolute; left: 0; bottom: 0; height: 12px; background: #ffb020; width: 0; }
 </style>
 <script type="importmap">
@@ -71,6 +79,8 @@
   </svg>
   <div id="throttle"><div class="bar"><div id="thrfill"></div></div><div><span class="t">THROTTLE</span><span id="thrv">0%</span></div></div>
   <div id="labels"></div>
+  <div id="wipe"></div>
+  <div id="wipetext"></div>
   <div id="caption"></div>
   <div id="progress"></div>
 </div>
@@ -315,7 +325,7 @@ function flow(n, size, fn) {
   const tmp = new THREE.Vector3(), col = new THREE.Color();
   let acc = 0, last = 0;
   return {
-    mat,
+    mat, pts,
     // base(i) -> starting phase; vary(i) -> per-particle speed multiplier
     update(t, speed, base = (i) => rand(i), vary = (i) => 0.8 + 0.4 * rand(i + 77)) {
       const dt = t - last; last = t;
@@ -439,6 +449,115 @@ const tailFlow = flow(320, 0.42, (u, i, v, c) => {
   c.setHSL(lerp(0.14, 0.0, u), 1, lerp(0.6, 0.35, u)).multiplyScalar(S.tailFlame * (1 - u) * 1.3);
 });
 
+// ---------- supercharger (belt-driven Roots blower) ----------
+// Everything built so far apart from the engine and lights belongs to the turbo setup.
+const turboObjs = scene.children.filter(o => o !== engine && !o.isLight);
+const scAssy = new THREE.Group(); scAssy.visible = false; scene.add(scAssy);
+const SC_Y = ENG_Y + 1.95, SC_LEN = 2.2, ROT_Z = 0.29, PUL_X = -1.98;
+const CRANK = new THREE.Vector3(PUL_X, ENG_Y - 0.4, ROT_Z), BLOWER_PUL = new THREE.Vector3(PUL_X, SC_Y, ROT_Z);
+const R_CRANK = 0.42, R_BLOWER = 0.25;
+const scMat = {
+  housing: new THREE.MeshStandardMaterial({ color: 0x7c848e, metalness: 0.6, roughness: 0.55, side: THREE.DoubleSide, clippingPlanes: cut }),
+  rotor: new THREE.MeshStandardMaterial({ color: 0x8f969f, metalness: 0.75, roughness: 0.55, emissive: 0x46b6ff, emissiveIntensity: 0 }),
+  pulley: new THREE.MeshStandardMaterial({ color: 0x2b2f36, metalness: 0.7, roughness: 0.4 }),
+  belt: new THREE.MeshStandardMaterial({ color: 0x15171b, metalness: 0.1, roughness: 0.8, emissive: 0xff3020, emissiveIntensity: 0 }),
+  tick: new THREE.MeshBasicMaterial({ color: 0xffd21f }),
+};
+{ // housing: rounded box around both rotors, open at the cut-away
+  const hw = 0.66, hh = 0.42, rr = 0.36, sh = new THREE.Shape();
+  sh.moveTo(-hw + rr, -hh); sh.lineTo(hw - rr, -hh); sh.quadraticCurveTo(hw, -hh, hw, -hh + rr * 0.8);
+  sh.lineTo(hw, hh - rr * 0.8); sh.quadraticCurveTo(hw, hh, hw - rr, hh); sh.lineTo(-hw + rr, hh);
+  sh.quadraticCurveTo(-hw, hh, -hw, hh - rr * 0.8); sh.lineTo(-hw, -hh + rr * 0.8); sh.quadraticCurveTo(-hw, -hh, -hw + rr, -hh);
+  const g = new THREE.ExtrudeGeometry(sh, { depth: SC_LEN, bevelEnabled: false, curveSegments: 16 });
+  g.translate(0, 0, -SC_LEN / 2);
+  const m = new THREE.Mesh(g, scMat.housing);
+  m.rotation.y = Math.PI / 2; m.position.set(0, SC_Y, 0); scAssy.add(m); // shape x -> world z
+  // inlet (throttle body) on top and a plate onto the head
+  const inlet = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.75, 32, 1, true), scMat.housing);
+  inlet.position.set(0.2, SC_Y + 0.75, 0); scAssy.add(inlet);
+  const plate = new THREE.Mesh(new THREE.BoxGeometry(SC_LEN + 0.2, 0.18, 1.2), M.head);
+  plate.position.set(0, SC_Y - 0.5, -0.05); scAssy.add(plate);
+}
+// two 3-lobe helical rotors, axes along x
+function lobeRotor() {
+  const sh = new THREE.Shape(), N = 90;
+  for (let k = 0; k <= N; k++) {
+    const a = (k / N) * Math.PI * 2, r = 0.2 + 0.09 * Math.cos(3 * a);
+    k ? sh.lineTo(r * Math.cos(a), r * Math.sin(a)) : sh.moveTo(r * Math.cos(a), r * Math.sin(a));
+  }
+  const g = new THREE.ExtrudeGeometry(sh, { depth: SC_LEN - 0.12, bevelEnabled: false, steps: 40, curveSegments: 4 });
+  g.translate(0, 0, -(SC_LEN - 0.12) / 2);
+  const p = g.attributes.position;
+  for (let k = 0; k < p.count; k++) { // helical twist along the axis
+    const x = p.getX(k), y = p.getY(k), z = p.getZ(k), a = z * 0.55;
+    p.setXYZ(k, x * Math.cos(a) - y * Math.sin(a), x * Math.sin(a) + y * Math.cos(a), z);
+  }
+  g.computeVertexNormals();
+  const m = new THREE.Mesh(g, scMat.rotor);
+  const holder = new THREE.Group(); m.rotation.y = Math.PI / 2; holder.add(m); // extrude z -> world x
+  return holder;
+}
+const rotorA = lobeRotor(), rotorB = lobeRotor();
+rotorA.position.set(0, SC_Y, ROT_Z); rotorB.position.set(0, SC_Y, -ROT_Z);
+scAssy.add(rotorA, rotorB);
+// shaft to the blower pulley
+const scShaft = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1.0, 16), M.steel);
+scShaft.rotation.z = Math.PI / 2; scShaft.position.set(PUL_X + 0.45, SC_Y, ROT_Z); scAssy.add(scShaft);
+function pulley(r) {
+  const g = new THREE.Group();
+  const rim = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 0.16, 48), scMat.pulley);
+  rim.rotation.z = Math.PI / 2; g.add(rim);
+  for (let k = 0; k < 5; k++) { // bright spokes so rotation reads clearly
+    const s = new THREE.Mesh(new THREE.BoxGeometry(0.02, r * 1.7, 0.06), scMat.tick);
+    s.position.x = -0.09; s.rotation.x = (k / 5) * Math.PI; g.add(s);
+  }
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.25, r * 0.25, 0.2, 24), M.steel);
+  hub.rotation.z = Math.PI / 2; g.add(hub);
+  return g;
+}
+const crankPulley = pulley(R_CRANK), blowerPulley = pulley(R_BLOWER);
+crankPulley.position.copy(CRANK); blowerPulley.position.copy(BLOWER_PUL);
+scAssy.add(crankPulley, blowerPulley);
+// belt: convex hull of both pulley circles (in the y/z plane at x = PUL_X)
+const beltCurve = (() => {
+  const pts = [];
+  for (let k = 0; k < 64; k++) {
+    const a = (k / 64) * Math.PI * 2;
+    pts.push([CRANK.y + (R_CRANK + 0.03) * Math.sin(a), CRANK.z + (R_CRANK + 0.03) * Math.cos(a)]);
+    pts.push([BLOWER_PUL.y + (R_BLOWER + 0.03) * Math.sin(a), BLOWER_PUL.z + (R_BLOWER + 0.03) * Math.cos(a)]);
+  }
+  pts.sort((p, q) => p[0] - q[0] || p[1] - q[1]);
+  const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lo = [], hi = [];
+  for (const p of pts) { while (lo.length >= 2 && cross(lo[lo.length - 2], lo[lo.length - 1], p) <= 0) lo.pop(); lo.push(p); }
+  for (const p of [...pts].reverse()) { while (hi.length >= 2 && cross(hi[hi.length - 2], hi[hi.length - 1], p) <= 0) hi.pop(); hi.push(p); }
+  const hull = lo.slice(0, -1).concat(hi.slice(0, -1));
+  return new THREE.CatmullRomCurve3(hull.map(([y, z]) => new THREE.Vector3(PUL_X, y, z)), true, 'centripetal');
+})();
+scAssy.add(new THREE.Mesh(new THREE.TubeGeometry(beltCurve, 300, 0.05, 10, true), scMat.belt));
+const beltTicks = [];
+for (let k = 0; k < 26; k++) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.04, 0.04), scMat.tick); scAssy.add(m); beltTicks.push(m);
+}
+// air: down the inlet, around the outside of each rotor (carried in the lobe pockets), down into the head
+const scFlow = flow(700, 0.15, (u, i, v, c) => {
+  const side = i % 2 ? 1 : -1, x = -0.9 + rand(i + 21) * 1.8;
+  if (u < 0.3) {
+    const k = u / 0.3, r = Math.sqrt(rand(i + 22)) * 0.26, a = rand(i + 23) * 6.283;
+    v.set(0.2 + r * Math.cos(a) + (x - 0.2) * smooth((k - 0.6) / 0.4), lerp(SC_Y + 1.5, SC_Y + 0.38, k), r * Math.sin(a));
+    c.copy(COLD);
+  } else if (u < 0.75) {
+    const k = (u - 0.3) / 0.45, a = lerp(Math.PI / 2, -Math.PI / 2, k), r = 0.33 + (rand(i + 24) - .5) * 0.05;
+    v.set(x, SC_Y + r * Math.sin(a), side * (ROT_Z + r * Math.cos(a)));
+    c.copy(COLD).lerp(WARM, k * 0.6);
+  } else {
+    const k = (u - 0.75) / 0.25;
+    v.set(x, lerp(SC_Y - 0.35, ENG_Y + 0.75, k), side * ROT_Z * (1 - k) + (rand(i + 25) - .5) * 0.3);
+    c.copy(COLD).lerp(WARM, 0.6 * (1 - k));
+  }
+});
+scAssy.add(scFlow.pts);
+
 // ---------- labels ----------
 const labelDefs = {
   exhaust: { text: 'HOT EXHAUST', c: '#ff6a1a', p: [-1.3, -2.2, -0.4] },
@@ -462,6 +581,18 @@ const labelDefs = {
   ignite: { text: 'FUEL + AIR IGNITE', c: '#ff6a1a', p: [-2.1, -0.7, 0.3] },
   spinning: { text: 'TURBINE KEEPS SPINNING', c: '#ffd21f', p: [TURB_X + 0.2, 1.4, 0] },
   bang: { text: 'BANG!', c: '#ff4d2e', p: [-5.4, -3.7, 0] },
+  // supercharger story
+  exhaustDriven: { text: 'EXHAUST-DRIVEN', c: '#ff6a1a', p: [TURB_X, 1.45, 0] },
+  beltDrive: { text: 'BELT DRIVE', c: '#ffd21f', p: [PUL_X, -2.95, 1.05] },
+  crank: { text: 'CRANKSHAFT', c: '#9fd3ff', p: [PUL_X - 0.1, CRANK.y + 0.62, -0.6] },
+  rotors: { text: 'ROTORS', c: '#46b6ff', p: [0.8, SC_Y - 0.15, 0.85] },
+  airIn: { text: 'AIR IN', c: '#46b6ff', p: [0.2, SC_Y + 1.35, 0] },
+  noLag: { text: 'INSTANT BOOST', c: '#4dff88', p: [0, SC_Y + 1.25, 0] },
+  eats: { text: 'EATS ENGINE POWER', c: '#ff4d2e', p: [PUL_X, SC_Y + 0.7, 0.6] },
+  free: { text: 'FREE EXHAUST ENERGY', c: '#ff6a1a', p: [TURB_X + 0.6, -1.3, 0.6] },
+  canLag: { text: 'BUT IT CAN LAG', c: '#ff4d2e', p: [0.3, 0.75, 0.4] },
+  vSc: { text: 'INSTANT PUNCH', c: '#4dff88', p: [0, SC_Y + 1.3, 0] },
+  vTurbo: { text: 'EFFICIENT POWER', c: '#ffd21f', p: [0, 1.5, 0] },
 };
 const labelEls = {};
 for (const [k, d] of Object.entries(labelDefs)) {
@@ -603,6 +734,67 @@ const stories = {
       return st;
     },
   },
+
+  sc: {
+    shots: {
+      sc_intro:   { off: [5.0, 2.4, 9.0],   tgt: [0.3, -1.3, 0], orbit: 0.3 },
+      turbo_side: { off: [-3.4, 1.2, 5.2],  tgt: [TURB_X, -0.4, 0], orbit: 0.12 },
+      sc_belt:    { off: [-5.2, 1.0, 3.4],  tgt: [-1.95, -3.6, 0.2], orbit: -0.12 },
+      sc_rotors:  { off: [1.4, 2.6, 4.4],   tgt: [0, -1.95, 0], orbit: 0.14 },
+      sc_instant: { off: [3.4, 2.0, 8.4],   tgt: [0, -2.7, 0], orbit: 0.1 },
+      sc_cost:    { off: [-4.8, 1.5, 5.0],  tgt: [-1.6, -3.4, 0.2], orbit: 0.1 },
+      turbo_pro:  { off: [3.6, 1.6, 7.6],   tgt: [0, -0.6, 0], orbit: -0.12 },
+      verdict:    { off: [5.2, 2.2, 10.5],  tgt: [0, -1.9, 0], orbit: 0.3 },
+    },
+    modeAt(t) {
+      const si = sceneAt(t), name = lines[si].scene;
+      if (name === 'sc_intro') return t < wordTime(si, 'difference') - 0.1 ? 'turbo' : 'sc';
+      if (name === 'verdict') return t < wordTime(si, 'turbo') - 0.1 ? 'sc' : 'turbo';
+      return name.startsWith('sc_') ? 'sc' : 'turbo';
+    },
+    state(name, { t, sceneStart, sceneLen, local, si }) {
+      const is = (...n) => n.includes(name);
+      const since = (x) => t - x;
+      const st = { scSpeed: 1, exA: 1, inA: 0.85 };
+      if (is('sc_intro')) {
+        st.title = 'SUPERCHARGER<br><span>vs</span> TURBO'; st.titleOp = smooth(t / 0.5); st.spool = 0.8;
+      }
+      if (is('turbo_side')) {
+        st.hotGlow = 0.6; st.inA = 0.35; st.labels = ['exhaustDriven'];
+      }
+      if (is('sc_belt')) { st.labels = ['beltDrive', 'crank']; st.flame = 0.6; }
+      if (is('sc_rotors')) { st.labels = ['rotors', 'airIn']; st.rotorGlow = 0.12 + 0.08 * Math.sin(t * 6); }
+      if (is('sc_instant')) {
+        const tGo = sceneStart + 0.6, k = smooth((t - tGo) / 0.12);
+        st.throttle = k; st.throttleOp = 1; st.boostOp = 1;
+        st.psi = lerp(2, 12, smooth((t - tGo - 0.05) / 0.2));
+        st.engineRate = lerp(1.2, 2.6, k); st.flame = 1;
+        st.labels = ['noLag']; st.labelOp = { noLag: smooth(since(wordTime(si, 'no')) / 0.25) };
+      }
+      if (is('sc_cost')) {
+        st.beltGlow = 0.6 + 0.4 * Math.sin(t * 9); st.labels = ['eats', 'crank'];
+        st.engineRate = 1.8; st.flame = 0.6;
+      }
+      if (is('turbo_pro')) {
+        const tGo = sceneStart + 0.5;
+        st.throttle = smooth((t - tGo) / 0.12); st.throttleOp = 1; st.boostOp = 1;
+        const lagEnd = wordTime(si, 'but') + 0.2, up = smooth((t - lagEnd) / 0.5);
+        st.psi = lerp(lerp(0, 3, smooth((t - tGo) / 2)), 18, up);
+        st.spool = lerp(lerp(0.25, 0.45, smooth((t - tGo) / 2)), 1, up);
+        st.exDensity = lerp(0.6, 1, up);
+        st.labels = ['free', 'canLag']; st.labelOp = { canLag: smooth(since(wordTime(si, 'but')) / 0.25) };
+      }
+      if (is('verdict')) {
+        const tW = wordTime(si, 'which');
+        st.title = 'WHICH WOULD<br>YOU <span>PICK?</span>'; st.titleOp = smooth(since(tW) / 0.35);
+        st.labels = ['vSc', 'vTurbo'];
+        st.labelOp = { vSc: since(wordTime(si, 'turbo') - 0.1) < 0 ? smooth(since(sceneStart + 0.6) / 0.3) : 0,
+                       vTurbo: since(wordTime(si, 'turbo') - 0.1) >= 0 && since(tW) < 0 ? smooth(since(wordTime(si, 'turbo') + 0.1) / 0.3) : 0 };
+        st.engineRate = 2.0; st.flame = 0.8;
+      }
+      return st;
+    },
+  },
 };
 const story = stories[timeline.story || 'turbo'];
 const shots = story.shots;
@@ -612,6 +804,12 @@ function sceneAt(t) {
   for (let i = 0; i < lines.length; i++) if (t >= lines[i].s - 0.25) idx = i;
   return idx;
 }
+const modeAt = story.modeAt || (() => 'turbo');
+const modeSwitches = [];
+for (let f = 1, prev = modeAt(0); f <= timeline.duration * 30; f++) {
+  const m = modeAt(f / 30); if (m !== prev) modeSwitches.push(f / 30); prev = m;
+}
+let scCrankAngle = 0;
 function shotVectors(name, local) {
   const s = shots[name], tgt = new THREE.Vector3(...s.tgt), off = new THREE.Vector3(...s.off);
   off.applyAxisAngle(new THREE.Vector3(0, 1, 0), s.orbit * local);
@@ -625,7 +823,7 @@ for (const ln of lines) {
   let cur = [];
   ln.words.forEach((w, i) => {
     cur.push(w);
-    const end = /[,.?!]$/.test(w.w) || cur.length >= 3 || i === ln.words.length - 1;
+    const end = /[,.?!:]$/.test(w.w) || cur.length >= 3 || i === ln.words.length - 1;
     if (end) { groups.push({ words: cur, s: cur[0].s, e: cur[cur.length - 1].e }); cur = []; }
   });
 }
@@ -636,7 +834,7 @@ function updateCaption(t) {
   const g = groups[gi];
   if (!g || t > g.e + 0.35) { capEl.innerHTML = ''; lastGroup = -1; return; }
   if (gi !== lastGroup) {
-    capEl.innerHTML = g.words.map(w => `<span class="w">${w.w.replace(/[,.?!]+$/, '')}</span>`).join(' ');
+    capEl.innerHTML = g.words.map(w => `<span class="w">${w.w.replace(/[,.?!:]+$/, '')}</span>`).join(' ');
     lastGroup = gi;
   }
   const pop = smooth((t - g.s) / 0.12);
@@ -758,6 +956,44 @@ window.renderAt = function (t) {
       L.el.style.top = `${(-v.y * 0.5 + 0.5) * H}px`;
       L.el.style.transform = `translate(-50%,-50%) scale(${0.8 + 0.2 * op})`;
     }
+  }
+
+  // turbo / supercharger setup switch, hidden behind a wipe
+  const mode = modeAt(t);
+  scAssy.visible = mode === 'sc';
+  for (const o of turboObjs) o.visible = mode !== 'sc';
+  if (mode !== 'sc') divider.visible = S.twin > 0.01;
+  let wipe = null, incoming = mode;
+  for (const sw of modeSwitches) if (Math.abs(t - sw) < 0.3) { wipe = (t - sw + 0.3) / 0.6; incoming = modeAt(sw + 0.05); }
+  const wipeText = document.getElementById('wipetext');
+  wipeText.textContent = incoming === 'sc' ? 'SUPERCHARGER' : 'TURBO';
+  wipeText.style.opacity = wipe === null ? 0 : clamp(1 - Math.abs(wipe - 0.5) * 3.5);
+  wipeText.style.transform = `translateY(-50%) scale(${wipe === null ? 1 : 0.9 + 0.2 * wipe})`;
+  const wipeEl = document.getElementById('wipe');
+  wipeEl.style.display = wipe === null ? 'none' : 'flex';
+  if (wipe !== null) {
+    const e = wipe < 0.5 ? 0.5 * smooth(wipe * 2) : 0.5 + 0.5 * smooth(wipe * 2 - 1);
+    wipeEl.style.transform = `translateX(${lerp(110, -190, e)}%) skewX(-14deg)`;
+  }
+  // supercharger drive train: crank -> belt -> blower pulley (overdriven) -> rotors
+  if (scAssy.visible) {
+    const crankW = engineRate * Math.PI * 2 * 0.6;          // rad/s, tied to engine speed
+    scCrankAngle += dt * crankW;
+    const beltDist = scCrankAngle * R_CRANK;
+    crankPulley.rotation.x = -scCrankAngle;
+    blowerPulley.rotation.x = -beltDist / R_BLOWER;
+    rotorA.rotation.x = -beltDist / R_BLOWER;
+    rotorB.rotation.x = beltDist / R_BLOWER + Math.PI / 3;
+    const L = beltCurve.getLength();
+    beltTicks.forEach((m, k) => {
+      const u = frac(k / beltTicks.length + beltDist / L);
+      m.position.copy(beltCurve.getPointAt(u));
+      m.lookAt(m.position.clone().add(beltCurve.getTangentAt(u)));
+    });
+    scMat.belt.emissiveIntensity = S.beltGlow || 0;
+    scMat.rotor.emissiveIntensity = S.rotorGlow || 0;
+    scFlow.mat.opacity = 0.95;
+    scFlow.update(t, 0.12 * engineRate);
   }
 
   updateCaption(t);

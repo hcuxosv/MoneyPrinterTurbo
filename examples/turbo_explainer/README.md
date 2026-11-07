@@ -1,12 +1,13 @@
 # Turbo 3D short-form explainers
 
 Vertical (1080×1920, 30 fps) 3D explainer videos with an AI voice-over and
-word-by-word "karaoke" captions. Two "stories" share one 3D turbo model:
+word-by-word "karaoke" captions. Three "stories" share one 3D engine model:
 
 | Story | Video | Length |
 |-------|-------|--------|
 | `turbo` | How a Turbo Works: exhaust → turbine → shaft → compressor → intercooler → wastegate | ~41 s |
 | `lag` | Turbo lag: causes (low exhaust energy, rotating inertia), twin-scroll pulse separation, anti-lag | ~54 s |
+| `sc` | Supercharger vs turbo: belt-driven Roots blower vs exhaust-driven turbo, instant boost vs efficiency | ~40 s |
 
 | Step | Tool | File |
 |------|------|------|
@@ -19,6 +20,7 @@ word-by-word "karaoke" captions. Two "stories" share one 3D turbo model:
 ```bash
 ./build.sh            # writes ./build/how_a_turbo_works.mp4
 ./build.sh lag        # writes ./build/turbo_lag_twin_scroll_anti_lag.mp4
+./build.sh sc         # writes ./build/supercharger_vs_turbo.mp4
 ```
 
 Requirements: Python 3 (`pip install kokoro-onnx soundfile`), Node 18+ with

@@ -43,6 +43,16 @@ SCRIPTS = {
         ("antilag_cost", "That's the pops and bangs you hear from rally cars. Instant boost, but brutal on parts."),
         ("outro", "That's turbo lag, and how engineers kill it."),
     ],
+    "sc": [
+        ("sc_intro", "Superchargers and turbos both cram extra air into your engine. The difference is what drives them."),
+        ("turbo_side", "A turbo is exhaust-driven. Hot gas that would be wasted spins a turbine."),
+        ("sc_belt", "A supercharger is belt-driven, powered straight off the crankshaft."),
+        ("sc_rotors", "The belt spins a pair of rotors that force air down into the intake."),
+        ("sc_instant", "Since it's tied to engine speed, boost is instant. No lag, right off idle."),
+        ("sc_cost", "The catch? Turning it eats engine power, so it's less efficient."),
+        ("turbo_pro", "A turbo recycles energy for free, so it's more efficient, but it can lag."),
+        ("verdict", "Supercharger: instant punch. Turbo: efficient power. Which one would you pick?"),
+    ],
 }
 
 VOICE = "am_michael"
@@ -56,7 +66,7 @@ LEAD_IN = 0.35
 def word_weight(w: str) -> float:
     core = re.sub(r"[^A-Za-z0-9]", "", w)
     vowels = len(re.findall(r"[aeiouy]+", core.lower())) or 1
-    return 0.6 + vowels + (0.4 if re.search(r"[,.?!]$", w) else 0)
+    return 0.6 + vowels + (0.4 if re.search(r"[,.?!:]$", w) else 0)
 
 
 def pauses(audio, sr, win=0.02, min_len=0.07, thresh=0.012):
@@ -81,7 +91,7 @@ def word_timings(text, audio, sr, t0):
     weights = [word_weight(w) for w in words]
     dur = len(audio) / sr
     gaps = pauses(audio, sr)
-    breaks = [i for i, w in enumerate(words[:-1]) if re.search(r"[,.?!]$", w)]
+    breaks = [i for i, w in enumerate(words[:-1]) if re.search(r"[,.?!:]$", w)]
     # each break: expected time by weight, snapped to the nearest later pause within 0.6 s
     spans, bounds, cur = [], [0], 0.0
     for br in breaks:
