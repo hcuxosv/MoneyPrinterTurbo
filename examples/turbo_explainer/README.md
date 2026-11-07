@@ -1,7 +1,12 @@
-# How a Turbo Works — 3D short-form explainer
+# Turbo 3D short-form explainers
 
-A ~41 s vertical (1080×1920, 30 fps) 3D explainer video with an AI voice-over
-and word-by-word "karaoke" captions.
+Vertical (1080×1920, 30 fps) 3D explainer videos with an AI voice-over and
+word-by-word "karaoke" captions. Two "stories" share one 3D turbo model:
+
+| Story | Video | Length |
+|-------|-------|--------|
+| `turbo` | How a Turbo Works: exhaust → turbine → shaft → compressor → intercooler → wastegate | ~41 s |
+| `lag` | Turbo lag: causes (low exhaust energy, rotating inertia), twin-scroll pulse separation, anti-lag | ~54 s |
 
 | Step | Tool | File |
 |------|------|------|
@@ -13,6 +18,7 @@ and word-by-word "karaoke" captions.
 
 ```bash
 ./build.sh            # writes ./build/how_a_turbo_works.mp4
+./build.sh lag        # writes ./build/turbo_lag_twin_scroll_anti_lag.mp4
 ```
 
 Requirements: Python 3 (`pip install kokoro-onnx soundfile`), Node 18+ with
@@ -20,10 +26,12 @@ Requirements: Python 3 (`pip install kokoro-onnx soundfile`), Node 18+ with
 model files (~350 MB) from GitHub releases and `three@0.170.0` from npm on
 first run.
 
-To tweak the narration, edit `SCRIPT` in `voiceover.py`; the scene ids map to
-camera shots, labels and effects in `scene.html` (`shots`, `sceneLabels`).
+To tweak the narration, edit `SCRIPTS` in `voiceover.py`. Each line's scene id
+maps to a camera shot and a per-frame state (spool speed, flows, labels, HUD,
+twin-scroll, fireballs…) in the matching entry of `stories` in `scene.html`.
+Caption word times are anchored to the pauses detected in the generated audio.
 Preview individual frames without rendering the whole video:
 
 ```bash
-node render.mjs --build build --stills 2,10,25
+node render.mjs --build build/lag --stills 2,10,25
 ```

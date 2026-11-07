@@ -39,6 +39,15 @@
   #boost {
     position: absolute; top: 110px; right: 50px; width: 300px; height: 300px; opacity: 0;
   }
+  #throttle {
+    position: absolute; top: 110px; left: 50px; width: 300px; height: 300px; opacity: 0; box-sizing: border-box;
+    border-radius: 40px; background: rgba(10,14,22,.8); border: 5px solid #fff;
+    display: flex; align-items: center; gap: 26px; padding: 0 34px; color: #fff; font-weight: 900;
+  }
+  #throttle .bar { position: relative; width: 56px; height: 210px; border-radius: 14px; background: #1d2633; overflow: hidden; }
+  #throttle #thrfill { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: linear-gradient(#4dff88, #19c25a); }
+  #throttle .t { font-size: 30px; letter-spacing: 2px; }
+  #throttle #thrv { font-size: 64px; color: #4dff88; display: block; margin-top: 6px; }
   #progress { position: absolute; left: 0; bottom: 0; height: 12px; background: #ffb020; width: 0; }
 </style>
 <script type="importmap">
@@ -60,6 +69,7 @@
     <text y="48" text-anchor="middle" fill="#fff" font-size="22" font-weight="900" font-family="Inter">BOOST</text>
     <text id="psi" y="76" text-anchor="middle" fill="#ffd21f" font-size="20" font-weight="800" font-family="Inter">0 PSI</text>
   </svg>
+  <div id="throttle"><div class="bar"><div id="thrfill"></div></div><div><span class="t">THROTTLE</span><span id="thrv">0%</span></div></div>
   <div id="labels"></div>
   <div id="caption"></div>
   <div id="progress"></div>
@@ -126,7 +136,7 @@ const M = {
   cut: new THREE.MeshStandardMaterial({ color: 0xff5a1f, metalness: 0.2, roughness: 0.6, side: THREE.DoubleSide }),
   steel: new THREE.MeshStandardMaterial({ color: 0xd0d5dc, metalness: 1.0, roughness: 0.25, emissive: 0x44aaff, emissiveIntensity: 0 }),
   turbineWheel: new THREE.MeshStandardMaterial({ color: 0x8a7a6a, metalness: 0.95, roughness: 0.35, emissive: 0xff5a00, emissiveIntensity: 0.15 }),
-  compWheel: new THREE.MeshStandardMaterial({ color: 0xc8cdd4, metalness: 0.95, roughness: 0.28 }),
+  compWheel: new THREE.MeshStandardMaterial({ color: 0xc8cdd4, metalness: 0.95, roughness: 0.28, emissive: 0x46b6ff, emissiveIntensity: 0 }),
   pipeHot: new THREE.MeshStandardMaterial({ color: 0x6b625c, metalness: 0.85, roughness: 0.38, side: THREE.DoubleSide, clippingPlanes: cut, emissive: 0xff3300, emissiveIntensity: 0.0 }),
   pipeCold: new THREE.MeshStandardMaterial({ color: 0x2a6fd6, metalness: 0.5, roughness: 0.35, side: THREE.DoubleSide, clippingPlanes: cut }),
   engine: new THREE.MeshStandardMaterial({ color: 0x4d5560, metalness: 0.45, roughness: 0.65, side: THREE.DoubleSide, clippingPlanes: cut }),
@@ -259,7 +269,7 @@ for (let i = 0; i < 4; i++) {
 // exhaust: manifold -> turbine volute entry (bottom, travelling +z)
 const exhaustIn = pipe([[-1.2, ENG_Y + 1.25, -0.2], [-1.25, -2.0, -0.6], [TURB_X, -1.25, -0.75], [TURB_X, -R_T - 0.02, -0.25], [TURB_X, -R_T, 0.05]], 0.27, M.pipeHot);
 // exhaust outlet (downpipe) axial -x
-const exhaustOut = pipe([[TURB_X - 0.15, 0, 0], [-2.4, 0, 0], [-2.9, -0.3, 0], [-3.2, -1.4, 0], [-3.25, -4.8, 0]], 0.32, M.pipeHot);
+const exhaustOut = pipe([[TURB_X - 0.15, 0, 0], [-2.4, 0, 0], [-2.9, -0.3, 0], [-3.2, -1.4, 0], [-3.25, -3.9, 0], [-3.55, -4.45, 0], [-4.3, -4.55, 0]], 0.32, M.pipeHot);
 // cold intake pipe, axial from +x
 const intakeIn = pipe([[3.6, 1.3, 0], [3.2, 0.2, 0], [2.6, 0, 0], [COMP_X + 0.45, 0, 0]], 0.36, M.pipeCold);
 // compressor outlet (top, travelling -z) -> intercooler -> intake manifold
@@ -294,6 +304,8 @@ const sprite = (() => {
   g.fillStyle = gr; g.fillRect(0, 0, 64, 64); return new THREE.CanvasTexture(c);
 })();
 
+// Particle stream. Each particle's path position u in [0,1) advances with an
+// integrated phase so speed changes never make particles jump.
 function flow(n, size, fn) {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
@@ -301,11 +313,16 @@ function flow(n, size, fn) {
   const mat = new THREE.PointsMaterial({ size, map: sprite, vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true, opacity: 1 });
   const pts = new THREE.Points(geo, mat); pts.frustumCulled = false; scene.add(pts);
   const tmp = new THREE.Vector3(), col = new THREE.Color();
+  let acc = 0, last = 0;
   return {
-    mat, update(t, speed) {
+    mat,
+    // base(i) -> starting phase; vary(i) -> per-particle speed multiplier
+    update(t, speed, base = (i) => rand(i), vary = (i) => 0.8 + 0.4 * rand(i + 77)) {
+      const dt = t - last; last = t;
+      acc = (dt < 0 || dt > 0.5) ? t * speed : acc + dt * speed;
       const P = geo.attributes.position, C = geo.attributes.color;
       for (let i = 0; i < n; i++) {
-        const u = frac(rand(i) + t * speed * (0.8 + 0.4 * rand(i + 77)));
+        const u = frac(base(i) + acc * vary(i));
         fn(u, i, tmp, col);
         P.setXYZ(i, tmp.x, tmp.y, tmp.z); C.setXYZ(i, col.r, col.g, col.b);
       }
@@ -315,19 +332,35 @@ function flow(n, size, fn) {
 }
 const jitter = (v, i, s) => v.set(v.x + (rand(i + 1) - .5) * s, v.y + (rand(i + 2) - .5) * s, v.z + (rand(i + 3) - .5) * s);
 const HOT = new THREE.Color(0xff6a1a), HOT2 = new THREE.Color(0xffc34a), COLD = new THREE.Color(0x46b6ff), WARM = new THREE.Color(0xff7ad0);
-let wgOpen = 0;
+const SCROLL_A = new THREE.Color(0xff7a1a), SCROLL_B = new THREE.Color(0xff2d7a);
+
+// Per-frame state, filled in by the active story (see `stories` below).
+const DEFAULT_STATE = {
+  spool: 1, exA: 0.85, inA: 0.85, exDensity: 1, exSpeed: null, inSpeed: null,
+  wgOpen: 0, twin: 0, pulse: 0, hotGlow: 0.18, shaftGlow: 0, wgGlow: 0, wheelGlow: 0,
+  engineRate: 1.6, flame: 0.35, fireball: 0, tailFlame: 0, shake: 0,
+  title: '', titleOp: 0, titleTop: 150,
+  rpm: 0, rpmOp: 0, rpmTop: 120, psi: 0, boostOp: 0, throttle: 0, throttleOp: 0,
+  labels: [], labelOp: {},
+};
+let S = { ...DEFAULT_STATE };
 
 const exhaustFlow = flow(900, 0.16, (u, i, v, c) => {
+  // twin-scroll: even particles use scroll A, odd use scroll B (split along the shaft axis)
+  const side = (i % 2 ? 1 : -1) * 0.14 * S.twin;
   // 0-0.45 pipe, 0.45-0.8 volute spiral inward, 0.8-1 axial out of downpipe
-  if (u < 0.45) { exhaustIn.getPointAt(u / 0.45, v); jitter(v, i, 0.3); }
+  if (u < 0.45) { exhaustIn.getPointAt(u / 0.45, v); jitter(v, i, 0.3 - 0.12 * S.twin); v.x += side; }
   else if (u < 0.8) {
     const k = (u - 0.45) / 0.35, a = -Math.PI / 2 + k * Math.PI * 2.1;
     const r = lerp(R_T, 0.35, smooth(k)) + (rand(i + 5) - .5) * 0.2;
-    v.set(TURB_X + (rand(i + 4) - .5) * 0.25, r * Math.sin(a), r * Math.cos(a));
+    v.set(TURB_X + (rand(i + 4) - .5) * lerp(0.25, 0.1, S.twin) + side * (1 - smooth(k)), r * Math.sin(a), r * Math.cos(a));
   } else {
     const k = (u - 0.8) / 0.2; exhaustOut.getPointAt(k * 0.85, v); jitter(v, i, 0.35);
   }
-  c.copy(HOT).lerp(HOT2, rand(i + 9) * 0.6).multiplyScalar(u > 0.8 ? 0.6 : 1);
+  c.copy(HOT).lerp(HOT2, rand(i + 9) * 0.6);
+  if (S.twin > 0) c.lerp(i % 2 ? SCROLL_B : SCROLL_A, S.twin * (u < 0.8 ? 0.9 : 0.4));
+  c.multiplyScalar(u > 0.8 ? 0.6 : 1);
+  if (rand(i + 300) > S.exDensity) c.setRGB(0, 0, 0); // additive: black = invisible
 });
 const intakeFlow = flow(900, 0.15, (u, i, v, c) => {
   // 0-0.25 intake pipe, 0.25-0.42 impeller (radial out), 0.42-0.55 volute, 0.55-0.75 boost pipe, 0.75-0.85 intercooler, 0.85-1 charge pipe
@@ -345,10 +378,65 @@ const intakeFlow = flow(900, 0.15, (u, i, v, c) => {
     const k = (u - 0.75) / 0.1;
     v.set(IC.x + (rand(i + 1) - .5) * 0.4, IC.y + 1.15 - k * 2.3, IC.z + (rand(i + 2) - .5) * 0.9); c.copy(WARM).lerp(COLD, smooth(k));
   } else { chargePipe.getPointAt((u - 0.85) / 0.15, v); jitter(v, i, 0.22); c.copy(COLD); }
+  if (rand(i + 500) > 0.35 + 0.65 * S.spool) c.setRGB(0, 0, 0);
 });
 const wgFlow = flow(220, 0.15, (u, i, v, c) => {
   wgPipe.getPointAt(u, v); jitter(v, i, 0.12);
-  c.copy(HOT2).multiplyScalar(wgOpen);
+  c.copy(HOT2).multiplyScalar(S.wgOpen);
+});
+
+// ---------- twin-scroll divider (housing wall + wall inside the inlet pipe) ----------
+const dividerMat = new THREE.MeshStandardMaterial({ color: 0xffb020, metalness: 0.5, roughness: 0.4, emissive: 0xffb020, emissiveIntensity: 0.25, side: THREE.DoubleSide, clippingPlanes: cut, transparent: true, opacity: 0 });
+const divider = new THREE.Group(); scene.add(divider);
+{
+  // wall through the middle of the scroll, following its shrinking cross-section
+  const rp = [], ri = [], NS = 96;
+  for (let k = 0; k <= NS; k++) {
+    const u = k / NS, a = -Math.PI / 2 + u * Math.PI * 2 * 0.97, tube = lerp(0.42, 0.2, u) * 0.97;
+    for (const r of [R_T - tube, R_T + tube]) rp.push(TURB_X, r * Math.sin(a), r * Math.cos(a));
+    if (k < NS) { const b = k * 2; ri.push(b, b + 1, b + 2, b + 1, b + 3, b + 2); }
+  }
+  const rg = new THREE.BufferGeometry();
+  rg.setAttribute('position', new THREE.Float32BufferAttribute(rp, 3)); rg.setIndex(ri); rg.computeVertexNormals();
+  divider.add(new THREE.Mesh(rg, dividerMat));
+  // ribbon along the exhaust inlet pipe, spanning the pipe across the shaft axis
+  const N = 80, pos = [], idx = [], X = new THREE.Vector3(1, 0, 0);
+  for (let k = 0; k <= N; k++) {
+    const u = k / N, p = exhaustIn.getPointAt(u), tng = exhaustIn.getTangentAt(u);
+    const d = new THREE.Vector3().crossVectors(tng, X).normalize().multiplyScalar(0.26);
+    pos.push(p.x - d.x, p.y - d.y, p.z - d.z, p.x + d.x, p.y + d.y, p.z + d.z);
+    if (k < N) { const b = k * 2; idx.push(b, b + 1, b + 2, b + 1, b + 3, b + 2); }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx); g.computeVertexNormals();
+  divider.add(new THREE.Mesh(g, dividerMat));
+}
+
+// ---------- anti-lag fireballs + tailpipe flame ----------
+const fireballs = [];
+for (let k = 0; k < 6; k++) {
+  const m = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 16),
+    new THREE.MeshBasicMaterial({ color: 0xffa040, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }));
+  m.position.copy(exhaustIn.getPointAt(0.35 + k * 0.12 > 0.98 ? 0.98 : 0.35 + k * 0.12));
+  if (k === 5) m.position.set(TURB_X, -0.6, -0.5);
+  scene.add(m); fireballs.push(m);
+}
+const tailEnd = exhaustOut.getPointAt(1), tailDir = exhaustOut.getTangentAt(1);
+const tail = new THREE.Group(); tail.position.copy(tailEnd);
+tail.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tailDir); scene.add(tail);
+const tailOuter = new THREE.Mesh(new THREE.ConeGeometry(0.34, 1.6, 32, 1, true),
+  new THREE.MeshBasicMaterial({ color: 0xc8380a, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+const tailInner = new THREE.Mesh(new THREE.ConeGeometry(0.18, 1.0, 32, 1, true),
+  new THREE.MeshBasicMaterial({ color: 0xffb040, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+// cones point along +y (= out of the pipe) with their wide base at the pipe exit
+tail.add(tailOuter, tailInner);
+
+// flame puffs shooting out of the tailpipe
+const tailFlow = flow(320, 0.42, (u, i, v, c) => {
+  const spread = 0.12 + u * 0.55, len = 3.2 * Math.pow(u, 0.7) * (0.6 + 0.4 * S.tailFlame);
+  v.copy(tailEnd).addScaledVector(tailDir, len);
+  v.set(v.x, v.y + (rand(i + 11) - .5) * spread + u * 0.5, v.z + (rand(i + 12) - .5) * spread);
+  c.setHSL(lerp(0.14, 0.0, u), 1, lerp(0.6, 0.35, u)).multiplyScalar(S.tailFlame * (1 - u) * 1.3);
 });
 
 // ---------- labels ----------
@@ -364,6 +452,16 @@ const labelDefs = {
   cool: { text: 'COOL, DENSE AIR', c: '#46b6ff', p: [3.5, -1.8, 0.6] },
   wastegate: { text: 'WASTEGATE', c: '#ffb020', p: [-2.0, -0.55, -0.3] },
   power: { text: 'MORE POWER', c: '#ffd21f', p: [-0.2, 1.9, 0] },
+  // turbo-lag story
+  weak: { text: 'LOW RPM = WEAK EXHAUST', c: '#ff6a1a', p: [-1.35, -0.75, 0.4] },
+  mass: { text: 'HEAVY SPINNING MASS', c: '#9fd3ff', p: [0, 1.25, 0.3] },
+  twin: { text: 'TWIN-SCROLL HOUSING', c: '#ffb020', p: [TURB_X, 1.5, 0] },
+  scrollA: { text: 'CYL 1 + 4', c: '#ff7a1a', p: [-1.95, -1.25, 0.2] },
+  scrollB: { text: 'CYL 2 + 3', c: '#ff2d7a', p: [-0.3, -1.25, 0.2] },
+  faster: { text: 'FASTER SPOOL', c: '#ffd21f', p: [0, 1.6, 0] },
+  ignite: { text: 'FUEL + AIR IGNITE', c: '#ff6a1a', p: [-2.1, -0.7, 0.3] },
+  spinning: { text: 'TURBINE KEEPS SPINNING', c: '#ffd21f', p: [TURB_X + 0.2, 1.4, 0] },
+  bang: { text: 'BANG!', c: '#ff4d2e', p: [-5.4, -3.7, 0] },
 };
 const labelEls = {};
 for (const [k, d] of Object.entries(labelDefs)) {
@@ -372,27 +470,143 @@ for (const [k, d] of Object.entries(labelDefs)) {
   labelEls[k] = { el, pos: new THREE.Vector3(...d.p) };
 }
 
-// ---------- shots (camera position, target, fov) per scene ----------
-const shots = {
-  // pos is an offset from tgt; orbit = radians of slow orbit across the scene
-  intro:       { off: [5.0, 2.4, 9.0],   tgt: [0.3, -1.0, 0], orbit: 0.3 },
-  exhaust:     { off: [-3.0, 1.0, 6.6],  tgt: [-1.4, -2.3, -0.3], orbit: 0.08 },
-  turbine:     { off: [-3.6, 1.2, 4.6],  tgt: [TURB_X, 0.0, 0], orbit: 0.15 },
-  shaft:       { off: [0.0, 1.6, 9.0],   tgt: [0, 0.0, 0], orbit: 0.08 },
-  compressor:  { off: [3.6, 1.4, 6.2],   tgt: [COMP_X + 0.5, 0.0, 0], orbit: -0.12 },
-  intercooler: { off: [4.4, 0.8, 7.4],   tgt: [2.3, -1.4, -0.2], orbit: -0.08 },
-  power:       { off: [1.8, 1.0, 15.0],  tgt: [0.2, -2.6, 0], orbit: 0.08 },
-  wastegate:   { off: [-3.2, 0.9, 5.4],  tgt: [-1.9, -1.2, -0.4], orbit: 0.1 },
-  outro:       { off: [6.5, 2.4, 11.5],  tgt: [0.3, -1.6, 0], orbit: 0.4 },
-};
-// which labels appear in each scene
-const sceneLabels = {
-  exhaust: ['exhaust'], turbine: ['turbine'], shaft: ['turbineTop', 'shaft', 'compressor'],
-  compressor: ['compressor', 'freshair'], intercooler: ['hot', 'intercooler', 'cool'],
-  power: ['power'], wastegate: ['wastegate'],
-};
-
 const lines = timeline.lines;
+// time (s) at which word `w` (case-insensitive prefix match) is spoken in line `li`
+function wordTime(li, w) {
+  const hit = lines[li].words.find(x => x.w.toLowerCase().replace(/[^a-z0-9-]/g, '').startsWith(w));
+  return hit ? hit.s : lines[li].s;
+}
+
+// ---------- stories ----------
+// Each story: shots (camera offset from target, target, slow orbit in radians),
+// and state(name, c) -> partial state for this frame. c has t, sceneStart, sceneLen, local, si.
+const stories = {
+  turbo: {
+    shots: {
+      intro:       { off: [5.0, 2.4, 9.0],   tgt: [0.3, -1.0, 0], orbit: 0.3 },
+      exhaust:     { off: [-3.0, 1.0, 6.6],  tgt: [-1.4, -2.3, -0.3], orbit: 0.08 },
+      turbine:     { off: [-3.6, 1.2, 4.6],  tgt: [TURB_X, 0.0, 0], orbit: 0.15 },
+      shaft:       { off: [0.0, 1.6, 9.0],   tgt: [0, 0.0, 0], orbit: 0.08 },
+      compressor:  { off: [3.6, 1.4, 6.2],   tgt: [COMP_X + 0.5, 0.0, 0], orbit: -0.12 },
+      intercooler: { off: [4.4, 0.8, 7.4],   tgt: [2.3, -1.4, -0.2], orbit: -0.08 },
+      power:       { off: [1.8, 1.0, 15.0],  tgt: [0.2, -2.6, 0], orbit: 0.08 },
+      wastegate:   { off: [-3.2, 0.9, 5.4],  tgt: [-1.9, -1.2, -0.4], orbit: 0.1 },
+      outro:       { off: [6.5, 2.4, 11.5],  tgt: [0.3, -1.6, 0], orbit: 0.4 },
+    },
+    state(name, { t, sceneStart, sceneLen, local }) {
+      const is = (...n) => n.includes(name);
+      const st = {};
+      st.spool = is('intro') ? 0.25 + 0.2 * local : is('exhaust') ? 0.45 : is('turbine') ? lerp(0.45, 1, smooth(local * 1.5)) : 1;
+      st.hotGlow = is('exhaust', 'turbine', 'wastegate') ? 0.5 : 0.18;
+      st.shaftGlow = is('shaft') ? 0.6 + 0.4 * Math.sin(t * 8) : 0;
+      st.wgOpen = is('wastegate') ? smooth((t - sceneStart - 0.8) / 0.8) : 0;
+      st.wgGlow = is('wastegate') ? 0.35 + 0.25 * Math.sin(t * 6) : 0;
+      st.exA = is('exhaust', 'turbine', 'wastegate') ? 1 : is('intro', 'power', 'outro') ? 0.85 : 0.3;
+      st.inA = is('compressor', 'intercooler') ? 1 : is('intro', 'power', 'outro') ? 0.85 : 0.3;
+      st.engineRate = is('power') ? 3.2 : 1.6;
+      st.flame = is('power') ? 1 : 0.35;
+      if (is('intro')) { st.title = 'HOW A <span>TURBO</span><br>WORKS'; st.titleOp = smooth(t / 0.5); }
+      if (is('outro')) { st.title = "THAT'S A <span>TURBO</span>"; st.titleOp = smooth((t - sceneStart - 0.3) / 0.5); }
+      st.rpmOp = is('turbine') ? smooth((t - sceneStart - 0.6) / 0.4) : 0;
+      st.rpm = lerp(20000, 150000, smooth((t - sceneStart - 0.6) / (sceneLen * 0.75)));
+      st.boostOp = is('compressor', 'power', 'wastegate') ? smooth((t - sceneStart - 0.4) / 0.4) : 0;
+      st.psi = is('compressor') ? lerp(2, 14, smooth(local * 1.4)) : is('power') ? 18 : 18;
+      if (is('wastegate')) st.psi = st.wgOpen > 0 ? lerp(24, 17, st.wgOpen) : lerp(18, 24, smooth(local * 3));
+      st.labels = {
+        exhaust: ['exhaust'], turbine: ['turbine'], shaft: ['turbineTop', 'shaft', 'compressor'],
+        compressor: ['compressor', 'freshair'], intercooler: ['hot', 'intercooler', 'cool'],
+        power: ['power'], wastegate: ['wastegate'],
+      }[name] || [];
+      return st;
+    },
+  },
+
+  lag: {
+    shots: {
+      lag_intro:    { off: [4.2, 1.8, 8.2],   tgt: [0.0, -0.9, 0], orbit: 0.22 },
+      lag_cause:    { off: [-2.8, 1.0, 7.0],  tgt: [-1.0, -2.0, -0.2], orbit: 0.1 },
+      inertia:      { off: [0.8, 1.3, 5.4],   tgt: [0, 0.05, 0], orbit: 0.14 },
+      twinscroll:   { off: [-3.3, 1.5, 4.3],  tgt: [TURB_X, -0.45, 0], orbit: 0.16 },
+      pulses:       { off: [-2.4, 1.2, 8.8],  tgt: [-0.7, -1.8, 0], orbit: 0.08 },
+      ts_result:    { off: [3.0, 1.6, 7.6],   tgt: [0.0, -0.4, 0], orbit: -0.15 },
+      antilag:      { off: [5.5, 2.2, 12.0],  tgt: [-0.4, -2.0, 0], orbit: 0.12 },
+      antilag_how:  { off: [-3.4, 0.9, 5.4],  tgt: [-1.4, -1.25, -0.3], orbit: 0.1 },
+      antilag_cost: { off: [1.2, 0.9, 5.2],   tgt: [-5.0, -5.1, 0], orbit: 0.12 },
+      outro:        { off: [6.0, 2.4, 11.5],  tgt: [-0.3, -1.9, 0], orbit: 0.35 },
+    },
+    state(name, { t, sceneStart, sceneLen, local, si }) {
+      const is = (...n) => n.includes(name);
+      const st = { twin: 0, exA: 1, inA: 0.7 };
+      const since = (x) => t - x;
+      if (is('lag_intro')) {
+        const tFloor = wordTime(si, 'floor'), tHit = wordTime(si, 'boost');
+        st.throttle = smooth(since(tFloor) / 0.15); st.throttleOp = 1;
+        const hit = smooth(since(tHit - 0.35) / 0.5);
+        st.spool = lerp(lerp(0.12, 0.3, smooth(since(tFloor) / 2.5)), 1, hit);
+        st.exDensity = lerp(lerp(0.2, 0.45, st.throttle), 1, hit);
+        st.psi = lerp(lerp(0, 3, smooth(since(tFloor) / 2.0)), 21, hit);
+        st.boostOp = 1;
+        st.engineRate = lerp(0.9, 1.8, st.throttle);
+        st.title = 'TURBO <span>LAG</span>'; st.titleTop = 470;
+        st.titleOp = smooth(since(wordTime(si, 'delay')) / 0.3);
+        st.shake = 0.04 * Math.max(0, 1 - since(tHit) / 0.6) * (since(tHit) > 0);
+      }
+      if (is('lag_cause')) {
+        st.spool = 0.28; st.exDensity = 0.22; st.exSpeed = 0.1; st.engineRate = 0.8; st.flame = 0.6;
+        st.hotGlow = 0.1; st.inA = 0.3; st.labels = ['weak'];
+      }
+      if (is('inertia')) {
+        st.spool = lerp(0.08, 0.75, smooth(local * 1.1)); st.exDensity = 0.5; st.exA = 0.5; st.inA = 0.4;
+        st.wheelGlow = 0.45 + 0.25 * Math.sin(t * 5); st.labels = ['mass'];
+        st.rpm = lerp(12000, 70000, smooth(local * 1.1)); st.rpmOp = smooth((t - sceneStart - 0.4) / 0.4);
+      }
+      if (is('twinscroll', 'pulses', 'ts_result', 'antilag', 'antilag_how', 'antilag_cost', 'outro')) st.twin = 1;
+      if (is('twinscroll')) {
+        st.twin = smooth((t - sceneStart - 0.8) / 1.4); st.spool = 0.55; st.exDensity = 0.85; st.inA = 0.3;
+        st.labels = ['twin'];
+      }
+      if (is('pulses')) {
+        st.spool = 0.7; st.pulse = smooth((t - sceneStart) / 0.8); st.inA = 0.3; st.flame = 1;
+        st.labels = ['scrollA', 'scrollB'];
+      }
+      if (is('ts_result')) {
+        const tGo = sceneStart + 0.5;
+        st.throttle = smooth((t - tGo) / 0.12); st.throttleOp = 1; st.boostOp = 1;
+        const up = smooth((t - tGo - 0.15) / 0.7);
+        st.spool = lerp(0.35, 1, up); st.psi = lerp(1, 21, up); st.pulse = 0.5;
+        st.labels = ['faster'];
+      }
+      if (is('antilag', 'antilag_how', 'antilag_cost', 'outro')) {
+        st.throttle = 0; st.spool = 1; st.psi = 20; st.engineRate = 1.1; st.hotGlow = 0.6;
+      }
+      if (is('antilag')) {
+        st.throttleOp = 1; st.boostOp = 1; st.fireball = 0.5 * smooth(local * 2);
+        st.title = 'ANTI-<span>LAG</span>'; st.titleTop = 470; st.titleOp = smooth((t - sceneStart - 0.2) / 0.4);
+      }
+      if (is('antilag_how')) {
+        st.throttleOp = 1; st.boostOp = 1;
+        st.fireball = smooth(since(wordTime(si, 'fuel')) / 0.4);
+        st.hotGlow = lerp(0.6, 1.4, st.fireball);
+        st.labels = ['ignite', 'spinning'];
+        st.labelOp = { spinning: smooth(since(wordTime(si, 'keep')) / 0.3) };
+      }
+      if (is('antilag_cost')) {
+        const ph = frac((t - sceneStart) * 1.6), bang = ph < 0.18 ? 1 - ph / 0.18 : 0;
+        st.fireball = 1; st.hotGlow = 1.4; st.tailFlame = 0.35 + 0.65 * bang; st.shake = 0.06 * bang;
+        st.labels = ['bang']; st.labelOp = { bang: bang > 0 ? 0.5 + 0.5 * bang : 0 };
+      }
+      if (is('outro')) {
+        const ph = frac(t * 1.2), bang = ph < 0.15 ? 1 - ph / 0.15 : 0;
+        st.fireball = 0.5; st.tailFlame = 0.25 + 0.5 * bang;
+        st.title = 'LAG: <span>SOLVED</span>'; st.titleOp = smooth((t - sceneStart - 0.3) / 0.5);
+      }
+      return st;
+    },
+  },
+};
+const story = stories[timeline.story || 'turbo'];
+const shots = story.shots;
+
 function sceneAt(t) {
   let idx = 0;
   for (let i = 0; i < lines.length; i++) if (t >= lines[i].s - 0.25) idx = i;
@@ -422,7 +636,7 @@ function updateCaption(t) {
   const g = groups[gi];
   if (!g || t > g.e + 0.35) { capEl.innerHTML = ''; lastGroup = -1; return; }
   if (gi !== lastGroup) {
-    capEl.innerHTML = g.words.map(w => `<span class="w">${w.w.replace(/[,.?!]$/, '')}</span>`).join(' ');
+    capEl.innerHTML = g.words.map(w => `<span class="w">${w.w.replace(/[,.?!]+$/, '')}</span>`).join(' ');
     lastGroup = gi;
   }
   const pop = smooth((t - g.s) / 0.12);
@@ -436,7 +650,7 @@ function updateCaption(t) {
 
 // ---------- main render ----------
 const titleEl = document.getElementById('title'), rpmEl = document.getElementById('rpm'), rpmV = document.getElementById('rpmv');
-const boostEl = document.getElementById('boost');
+const boostEl = document.getElementById('boost'), thrEl = document.getElementById('throttle');
 let rotorAngle = 0, lastT = 0;
 
 window.renderAt = function (t) {
@@ -444,82 +658,99 @@ window.renderAt = function (t) {
   const si = sceneAt(t), ln = lines[si], name = ln.scene;
   const sceneStart = ln.s - 0.25, sceneLen = (lines[si + 1] ? lines[si + 1].s - 0.25 : timeline.duration) - sceneStart;
   const local = clamp((t - sceneStart) / sceneLen);
+  S = { ...DEFAULT_STATE, ...story.state(name, { t, sceneStart, sceneLen, local, si }) };
 
   // camera: ease from previous shot into this one during the first 0.9s
   const cur = shotVectors(name, local);
   let pos = cur.pos, tgt = cur.tgt;
   if (si > 0) {
-    const prev = lines[si - 1];
-    const pv = shotVectors(prev.scene, 1);
+    const pv = shotVectors(lines[si - 1].scene, 1);
     const k = smooth((t - sceneStart) / 0.9);
     pos = pv.pos.clone().lerp(cur.pos, k); tgt = pv.tgt.clone().lerp(cur.tgt, k);
   }
+  if (S.shake) {
+    pos = pos.clone().add(new THREE.Vector3(Math.sin(t * 91) * S.shake, Math.sin(t * 77 + 1) * S.shake, 0));
+  }
   camera.position.copy(pos); camera.lookAt(tgt);
-  
 
-  // turbo speed: spools up in the turbine scene and stays high
-  const spool = name === 'intro' ? 0.25 + 0.2 * local : name === 'exhaust' ? 0.45 : name === 'turbine' ? lerp(0.45, 1, smooth(local * 1.5)) : 1;
-  rotorAngle += dt * spool * 26;
+  rotorAngle += dt * S.spool * 26;
   rotor.rotation.x = rotorAngle;
 
-  // highlights
-  const is = (...n) => n.includes(name);
-  const hotGlow = is('exhaust', 'turbine', 'wastegate') ? 0.5 : 0.18;
-  M.iron.emissiveIntensity = hotGlow * 0.3;
-  M.pipeHot.emissiveIntensity = hotGlow * 0.3;
-  M.steel.emissiveIntensity = is('shaft') ? 0.6 + 0.4 * Math.sin(t * 8) : 0;
-  wgOpen = is('wastegate') ? smooth((t - sceneStart - 0.8) / 0.8) : is('outro') ? 0 : 0;
-  flap.rotation.y = wgOpen * 1.3;
-  M.wg.emissiveIntensity = is('wastegate') ? 0.35 + 0.25 * Math.sin(t * 6) : 0;
+  M.iron.emissiveIntensity = S.hotGlow * 0.3;
+  M.pipeHot.emissiveIntensity = S.hotGlow * 0.3;
+  M.steel.emissiveIntensity = S.shaftGlow;
+  M.wg.emissiveIntensity = S.wgGlow;
+  M.turbineWheel.emissiveIntensity = 0.15 + S.wheelGlow;
+  M.compWheel.emissiveIntensity = S.wheelGlow;
+  flap.rotation.y = S.wgOpen * 1.3;
+  dividerMat.opacity = S.twin; divider.visible = S.twin > 0.01;
 
-  const exA = is('exhaust', 'turbine', 'wastegate') ? 1 : is('intro', 'power', 'outro') ? 0.85 : 0.3;
-  const inA = is('compressor', 'intercooler') ? 1 : is('intro', 'power', 'outro') ? 0.85 : 0.3;
-  exhaustFlow.mat.opacity = exA; intakeFlow.mat.opacity = inA; wgFlow.mat.opacity = 1;
-  exhaustFlow.update(t, 0.22 * (0.6 + spool * 0.6) * (1 - wgOpen * 0.35));
-  intakeFlow.update(t, 0.12 * (0.5 + spool * 0.7));
+  // exhaust pulses: particles bunch into clumps released when each cylinder pair fires
+  const exSpeed = S.exSpeed ?? 0.22 * (0.6 + S.spool * 0.6) * (1 - S.wgOpen * 0.35);
+  const K = 3;
+  let engineRate = S.engineRate;
+  if (S.pulse > 0) engineRate = lerp(engineRate, K * exSpeed, S.pulse);
+  const exBase = (i) => {
+    const clump = (Math.floor(rand(i) * K) + (i % 2) * 0.5) / K + (rand(i + 40) - 0.5) * 0.06;
+    return lerp(rand(i), clump, S.pulse);
+  };
+  const exVary = (i) => lerp(0.8 + 0.4 * rand(i + 77), 1, S.pulse);
+  exhaustFlow.mat.opacity = S.exA; intakeFlow.mat.opacity = S.inA; wgFlow.mat.opacity = 1;
+  exhaustFlow.update(t, exSpeed, exBase, exVary);
+  intakeFlow.update(t, S.inSpeed ?? 0.12 * (0.5 + S.spool * 0.7));
   wgFlow.update(t, 0.6);
+  tailFlow.update(t, 1.6);
 
-  // engine: pistons + combustion flashes (stronger in power scene)
-  const rpmE = is('power') ? 3.2 : 1.6;
+  // engine: pistons + combustion flashes. Cylinders 1+4 fire together, then 2+3.
   pistons.forEach((p, i) => {
-    const ph = t * rpmE * Math.PI * 2 + [0, Math.PI, Math.PI, 0][i];
+    const ph = t * engineRate * Math.PI * 2 + [0, Math.PI, Math.PI, 0][i];
     p.position.y = ENG_Y + 0.1 + 0.32 * Math.cos(ph);
     const fire = Math.max(0, Math.cos(ph)) ** 12;
-    flames[i].material.opacity = fire * (is('power') ? 1 : 0.35);
+    flames[i].material.opacity = fire * S.flame;
     flames[i].scale.setScalar(0.8 + fire * 0.5); flames[i].scale.y *= 0.55;
   });
 
-  // HUD: title, rpm counter, boost gauge
-  let titleHTML = '', titleOp = 0;
-  if (name === 'intro') { titleHTML = 'HOW A <span>TURBO</span><br>WORKS'; titleOp = smooth(t / 0.5); }
-  if (name === 'outro') { titleHTML = "THAT'S A <span>TURBO</span>"; titleOp = smooth((t - sceneStart - 0.3) / 0.5); }
-  if (titleEl.innerHTML !== titleHTML) titleEl.innerHTML = titleHTML;
-  titleEl.style.opacity = titleOp;
-  titleEl.style.transform = `translateY(${(1 - titleOp) * 30}px)`;
+  // anti-lag fireballs in the manifold / turbine housing
+  fireballs.forEach((m, k) => {
+    const ph = frac(t * 2.1 + rand(k + 900));
+    m.scale.setScalar((0.15 + 0.38 * Math.sqrt(ph)) * (k === 5 ? 1.3 : 1));
+    m.material.opacity = S.fireball * (1 - ph) ** 2;
+    m.material.color.setHSL(lerp(0.13, 0.02, ph), 1, 0.55);
+  });
+  const flick = 0.85 + 0.15 * Math.sin(t * 53) * Math.sin(t * 31);
+  tail.scale.set(1, Math.max(0.001, S.tailFlame * flick), 1);
+  tailOuter.position.y = 0.8; tailInner.position.y = 0.5;
+  tailOuter.material.opacity = S.tailFlame * 0.22; tailInner.material.opacity = S.tailFlame * 0.35;
 
-  const rpmOp = is('turbine') ? smooth((t - sceneStart - 0.6) / 0.4) : 0;
-  rpmEl.style.opacity = rpmOp;
-  const rpm = lerp(20000, 150000, smooth((t - sceneStart - 0.6) / (sceneLen * 0.75)));
-  rpmV.textContent = (Math.round(rpm / 500) * 500).toLocaleString('en-US');
+  // HUD: title, rpm counter, boost gauge, throttle
+  if (titleEl.innerHTML !== S.title) titleEl.innerHTML = S.title;
+  titleEl.style.top = `${S.titleTop}px`;
+  titleEl.style.opacity = S.titleOp;
+  titleEl.style.transform = `translateY(${(1 - S.titleOp) * 30}px)`;
 
-  const boostOp = is('compressor', 'power', 'wastegate') ? smooth((t - sceneStart - 0.4) / 0.4) : 0;
-  boostEl.style.opacity = boostOp;
-  let psi = is('compressor') ? lerp(2, 14, smooth(local * 1.4)) : is('power') ? 18 : lerp(24, 16, wgOpen);
-  if (is('wastegate')) psi = wgOpen > 0 ? lerp(24, 17, wgOpen) : lerp(18, 24, smooth(local * 3));
-  psi += Math.sin(t * 17) * 0.3;
-  const ang = (-130 + 260 * psi / 30) * Math.PI / 180;
+  rpmEl.style.opacity = S.rpmOp; rpmEl.style.top = `${S.rpmTop}px`;
+  rpmV.textContent = (Math.round(S.rpm / 500) * 500).toLocaleString('en-US');
+
+  boostEl.style.opacity = S.boostOp;
+  const psi = S.psi + Math.sin(t * 17) * 0.3;
+  const ang = (-130 + 260 * clamp(psi, 0, 30) / 30) * Math.PI / 180;
   document.getElementById('needle').setAttribute('transform', `rotate(${ang * 180 / Math.PI})`);
   const a0 = -130 * Math.PI / 180, r = 78;
   const large = (ang - a0) > Math.PI ? 1 : 0;
   document.getElementById('arc').setAttribute('d', `M ${r * Math.sin(a0)} ${-r * Math.cos(a0)} A ${r} ${r} 0 ${large} 1 ${r * Math.sin(ang)} ${-r * Math.cos(ang)}`);
   document.getElementById('arc').setAttribute('stroke', psi > 21 ? '#ff4d2e' : '#ffb020');
-  document.getElementById('psi').textContent = `${Math.round(psi)} PSI`;
+  document.getElementById('psi').textContent = `${Math.max(0, Math.round(psi))} PSI`;
+
+  thrEl.style.opacity = S.throttleOp;
+  document.getElementById('thrfill').style.height = `${S.throttle * 100}%`;
+  document.getElementById('thrv').textContent = `${Math.round(S.throttle * 100)}%`;
 
   // labels
-  const want = sceneLabels[name] || [];
+  const want = S.labels;
   for (const [k, L] of Object.entries(labelEls)) {
     const on = want.includes(k);
-    const op = on ? smooth((t - sceneStart - 0.5 - want.indexOf(k) * 0.35) / 0.3) : 0;
+    let op = on ? smooth((t - sceneStart - 0.5 - want.indexOf(k) * 0.35) / 0.3) : 0;
+    if (on && k in S.labelOp) op = S.labelOp[k];
     L.el.style.opacity = op;
     if (op > 0) {
       const v = L.pos.clone().project(camera);
@@ -536,6 +767,7 @@ window.renderAt = function (t) {
 };
 window.duration = timeline.duration;
 window.ready = true;
+
 </script>
 </body>
 </html>

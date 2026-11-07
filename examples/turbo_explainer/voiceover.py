@@ -18,18 +18,32 @@ import numpy as np
 import soundfile as sf
 from kokoro_onnx import Kokoro
 
-# (scene id, narration). Scene ids drive the camera/animation in scene.html.
-SCRIPT = [
-    ("intro", "Ever wondered how a turbo makes a small engine hit like a big one?"),
-    ("exhaust", "It starts with hot exhaust gas leaving the engine."),
-    ("turbine", "That gas blasts through a turbine wheel, spinning it at up to one hundred fifty thousand RPM."),
-    ("shaft", "A shaft connects the turbine to a compressor wheel on the cold side."),
-    ("compressor", "The compressor sucks in fresh air and squeezes it, packing in way more oxygen."),
-    ("intercooler", "Squeezed air gets hot, so an intercooler cools it down, making it even denser."),
-    ("power", "More air means more fuel can burn, and that means more power."),
-    ("wastegate", "When boost gets too high, a wastegate opens and lets exhaust bypass the turbine."),
-    ("outro", "Wasted energy, turned into power. That's how a turbo works."),
-]
+# story -> [(scene id, narration)]. Scene ids drive the camera/animation in scene.html.
+SCRIPTS = {
+    "turbo": [
+        ("intro", "Ever wondered how a turbo makes a small engine hit like a big one?"),
+        ("exhaust", "It starts with hot exhaust gas leaving the engine."),
+        ("turbine", "That gas blasts through a turbine wheel, spinning it at up to one hundred fifty thousand RPM."),
+        ("shaft", "A shaft connects the turbine to a compressor wheel on the cold side."),
+        ("compressor", "The compressor sucks in fresh air and squeezes it, packing in way more oxygen."),
+        ("intercooler", "Squeezed air gets hot, so an intercooler cools it down, making it even denser."),
+        ("power", "More air means more fuel can burn, and that means more power."),
+        ("wastegate", "When boost gets too high, a wastegate opens and lets exhaust bypass the turbine."),
+        ("outro", "Wasted energy, turned into power. That's how a turbo works."),
+    ],
+    "lag": [
+        ("lag_intro", "You floor it, and... nothing. Then the boost hits all at once. That delay is turbo lag."),
+        ("lag_cause", "A turbo is powered by exhaust. At low RPM, the engine just doesn't make enough of it to spin the turbine fast."),
+        ("inertia", "On top of that, the wheels have mass, so it takes time to spool them up to speed."),
+        ("twinscroll", "Twin-scroll turbos fight this by splitting the turbine housing into two separate passages."),
+        ("pulses", "Cylinders are paired so their exhaust pulses don't collide, and each pulse hits the turbine harder."),
+        ("ts_result", "The result? The turbo spools sooner, with far less lag."),
+        ("antilag", "Race cars go even further, with anti-lag."),
+        ("antilag_how", "When the driver lifts off, fuel and air are fed into the hot exhaust, where they ignite and keep the turbine spinning."),
+        ("antilag_cost", "That's the pops and bangs you hear from rally cars. Instant boost, but brutal on parts."),
+        ("outro", "That's turbo lag, and how engineers kill it."),
+    ],
+}
 
 VOICE = "am_michael"
 SPEED = 1.08
@@ -45,10 +59,58 @@ def word_weight(w: str) -> float:
     return 0.6 + vowels + (0.4 if re.search(r"[,.?!]$", w) else 0)
 
 
+def pauses(audio, sr, win=0.02, min_len=0.07, thresh=0.012):
+    """Silent stretches inside the clip as (start, end, length) in seconds."""
+    hop = int(win * sr)
+    rms = np.array([np.sqrt(np.mean(audio[i:i + hop] ** 2)) for i in range(0, len(audio) - hop, hop)])
+    out, start = [], None
+    for k, quiet in enumerate(rms < thresh):
+        if quiet and start is None:
+            start = k
+        elif not quiet and start is not None:
+            if (k - start) * win >= min_len and start > 0:
+                out.append((start * win, k * win, (k - start) * win))
+            start = None
+    return out
+
+
+def word_timings(text, audio, sr, t0):
+    """Word start/end times. Phrase boundaries (after , . ? !) are snapped to the
+    longest pauses in the audio; words inside a phrase are spread by weight."""
+    words = text.split()
+    weights = [word_weight(w) for w in words]
+    dur = len(audio) / sr
+    gaps = pauses(audio, sr)
+    breaks = [i for i, w in enumerate(words[:-1]) if re.search(r"[,.?!]$", w)]
+    # each break: expected time by weight, snapped to the nearest later pause within 0.6 s
+    spans, bounds, cur = [], [0], 0.0
+    for br in breaks:
+        expected = dur * sum(weights[:br + 1]) / sum(weights)
+        cands = [g for g in gaps if g[0] > cur + 0.15 and abs((g[0] + g[1]) / 2 - expected) < 0.6]
+        if not cands:
+            continue
+        g = min(cands, key=lambda g: abs((g[0] + g[1]) / 2 - expected) - g[2])
+        spans.append((cur, g[0]))
+        bounds.append(br + 1)
+        cur = g[1]
+    spans.append((cur, dur))
+    bounds.append(len(words))
+    out = []
+    for (s, e), a, b in zip(spans, bounds[:-1], bounds[1:]):
+        ws, wg = words[a:b], weights[a:b]
+        acc = s
+        for w, wgt in zip(ws, wg):
+            d = (e - s) * wgt / sum(wg)
+            out.append({"w": w, "s": round(t0 + acc, 3), "e": round(t0 + acc + d, 3)})
+            acc += d
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--models", required=True)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--story", default="turbo", choices=sorted(SCRIPTS))
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
 
@@ -58,7 +120,7 @@ def main():
     chunks = [np.zeros(int(LEAD_IN * sr), dtype=np.float32)]
     t = LEAD_IN
     lines = []
-    for scene, text in SCRIPT:
+    for scene, text in SCRIPTS[args.story]:
         audio, sr = kokoro.create(text, voice=VOICE, speed=SPEED, lang="en-us")
         audio = audio.astype(np.float32)
         # trim leading/trailing near-silence so timings are tight
@@ -66,14 +128,7 @@ def main():
         if len(idx):
             audio = audio[max(0, idx[0] - 600): idx[-1] + 1200]
         dur = len(audio) / sr
-        words = text.split()
-        weights = [word_weight(w) for w in words]
-        total = sum(weights)
-        wt, acc = [], t
-        for w, wgt in zip(words, weights):
-            d = dur * wgt / total
-            wt.append({"w": w, "s": round(acc, 3), "e": round(acc + d, 3)})
-            acc += d
+        wt = word_timings(text, audio, sr, t)
         for spoken, shown in CAPTION_MERGE.items():
             n = len(spoken.split())
             for i in range(len(wt) - n + 1):
@@ -91,7 +146,7 @@ def main():
     sf.write(os.path.join(args.out, "voice.wav"), full, sr)
     total_dur = len(full) / sr
     with open(os.path.join(args.out, "timeline.json"), "w") as f:
-        json.dump({"duration": round(total_dur, 3), "lines": lines}, f, indent=1)
+        json.dump({"story": args.story, "duration": round(total_dur, 3), "lines": lines}, f, indent=1)
     print(f"total {total_dur:.2f}s")
 
 
