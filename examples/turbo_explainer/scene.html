@@ -1,0 +1,541 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Turbo Explainer</title>
+<style>
+  html, body { margin: 0; width: 1080px; height: 1920px; overflow: hidden; background: #07090d; }
+  canvas { display: block; }
+  #ui { position: absolute; inset: 0; pointer-events: none; font-family: "Inter", "Inter Display", sans-serif; }
+  #title {
+    position: absolute; top: 150px; left: 0; right: 0; text-align: center;
+    color: #fff; font-weight: 900; font-size: 92px; letter-spacing: -1px; line-height: 1.0;
+    text-shadow: 0 6px 30px rgba(0,0,0,.7); opacity: 0; transition: none;
+  }
+  #title span { color: #ffb020; }
+  #caption {
+    position: absolute; top: 1270px; left: 60px; right: 60px; text-align: center;
+    font-weight: 900; font-size: 96px; line-height: 1.08; color: #fff; text-transform: uppercase;
+    -webkit-text-stroke: 14px #000; paint-order: stroke fill;
+    text-shadow: 0 10px 0 rgba(0,0,0,.55);
+  }
+  #caption .w { display: inline-block; margin: 0 14px; transform-origin: 50% 70%; }
+  #caption .on { color: #ffd21f; }
+  .label {
+    position: absolute; transform: translate(-50%, -50%); white-space: nowrap;
+    font-weight: 800; font-size: 44px; color: #fff; letter-spacing: 2px;
+    padding: 10px 26px; border-radius: 999px;
+    background: rgba(10,14,22,.72); border: 3px solid var(--c, #fff);
+    box-shadow: 0 0 30px color-mix(in srgb, var(--c) 50%, transparent);
+    opacity: 0;
+  }
+  #rpm {
+    position: absolute; top: 120px; left: 0; right: 0; text-align: center; opacity: 0;
+    font-weight: 900; color: #fff; font-size: 150px; letter-spacing: -3px;
+    text-shadow: 0 0 40px rgba(255,120,30,.8);
+    font-variant-numeric: tabular-nums;
+  }
+  #rpm small { display: block; font-size: 50px; letter-spacing: 8px; color: #ff9a3c; margin-top: -10px; }
+  #boost {
+    position: absolute; top: 110px; right: 50px; width: 300px; height: 300px; opacity: 0;
+  }
+  #progress { position: absolute; left: 0; bottom: 0; height: 12px; background: #ffb020; width: 0; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "./node_modules/three/build/three.module.js",
+  "three/addons/": "./node_modules/three/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="ui">
+  <div id="title"></div>
+  <div id="rpm"><span id="rpmv">0</span><small>RPM</small></div>
+  <svg id="boost" viewBox="-100 -100 200 200">
+    <circle r="92" fill="rgba(10,14,22,.8)" stroke="#fff" stroke-width="5"/>
+    <path id="arc" d="" fill="none" stroke="#ffb020" stroke-width="12" stroke-linecap="round"/>
+    <line id="needle" x1="0" y1="0" x2="0" y2="-70" stroke="#ff4d2e" stroke-width="7" stroke-linecap="round"/>
+    <circle r="9" fill="#fff"/>
+    <text y="48" text-anchor="middle" fill="#fff" font-size="22" font-weight="900" font-family="Inter">BOOST</text>
+    <text id="psi" y="76" text-anchor="middle" fill="#ffd21f" font-size="20" font-weight="800" font-family="Inter">0 PSI</text>
+  </svg>
+  <div id="labels"></div>
+  <div id="caption"></div>
+  <div id="progress"></div>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+const W = 1080, H = 1920;
+const timeline = await (await fetch('timeline.json')).json();
+
+// ---------- helpers ----------
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const smooth = (x) => { x = clamp(x); return x * x * (3 - 2 * x); };
+const lerp = (a, b, t) => a + (b - a) * t;
+const frac = (x) => x - Math.floor(x);
+function rand(i) { const s = Math.sin(i * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); }
+
+// ---------- renderer / scene ----------
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(1);
+renderer.setSize(W, H);
+renderer.localClippingEnabled = true;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+document.body.prepend(renderer.domElement);
+
+const scene = new THREE.Scene();
+{ // background gradient
+  const c = document.createElement('canvas'); c.width = 16; c.height = 512;
+  const g = c.getContext('2d'); const gr = g.createLinearGradient(0, 0, 0, 512);
+  gr.addColorStop(0, '#16202e'); gr.addColorStop(0.55, '#0b1018'); gr.addColorStop(1, '#040507');
+  g.fillStyle = gr; g.fillRect(0, 0, 16, 512);
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+  scene.background = tex;
+}
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+scene.environmentIntensity = 0.7;
+
+const camera = new THREE.PerspectiveCamera(45, W / H, 0.05, 100);
+scene.add(new THREE.HemisphereLight(0xbfd8ff, 0x201810, 0.6));
+const key = new THREE.DirectionalLight(0xffffff, 2.2); key.position.set(4, 6, 8); scene.add(key);
+const rim = new THREE.DirectionalLight(0x6fa8ff, 1.4); rim.position.set(-6, 2, -6); scene.add(rim);
+
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(W / 2, H / 2), 0.55, 0.4, 0.92);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+
+// Cutaway: remove everything in front of z = 0 for housings & pipes
+const cut = [new THREE.Plane(new THREE.Vector3(0, 0, -1), 0.0)];
+
+// ---------- materials ----------
+const M = {
+  iron: new THREE.MeshStandardMaterial({ color: 0x4a4440, metalness: 0.8, roughness: 0.5, side: THREE.DoubleSide, clippingPlanes: cut, emissive: 0xff3a00, emissiveIntensity: 0.0 }),
+  alu: new THREE.MeshStandardMaterial({ color: 0xb4bac4, metalness: 0.85, roughness: 0.4, side: THREE.DoubleSide, clippingPlanes: cut }),
+  cut: new THREE.MeshStandardMaterial({ color: 0xff5a1f, metalness: 0.2, roughness: 0.6, side: THREE.DoubleSide }),
+  steel: new THREE.MeshStandardMaterial({ color: 0xd0d5dc, metalness: 1.0, roughness: 0.25, emissive: 0x44aaff, emissiveIntensity: 0 }),
+  turbineWheel: new THREE.MeshStandardMaterial({ color: 0x8a7a6a, metalness: 0.95, roughness: 0.35, emissive: 0xff5a00, emissiveIntensity: 0.15 }),
+  compWheel: new THREE.MeshStandardMaterial({ color: 0xc8cdd4, metalness: 0.95, roughness: 0.28 }),
+  pipeHot: new THREE.MeshStandardMaterial({ color: 0x6b625c, metalness: 0.85, roughness: 0.38, side: THREE.DoubleSide, clippingPlanes: cut, emissive: 0xff3300, emissiveIntensity: 0.0 }),
+  pipeCold: new THREE.MeshStandardMaterial({ color: 0x2a6fd6, metalness: 0.5, roughness: 0.35, side: THREE.DoubleSide, clippingPlanes: cut }),
+  engine: new THREE.MeshStandardMaterial({ color: 0x4d5560, metalness: 0.45, roughness: 0.65, side: THREE.DoubleSide, clippingPlanes: cut }),
+  head: new THREE.MeshStandardMaterial({ color: 0x23272e, metalness: 0.6, roughness: 0.5, side: THREE.DoubleSide, clippingPlanes: cut }),
+  piston: new THREE.MeshStandardMaterial({ color: 0xa9aeb5, metalness: 0.6, roughness: 0.5 }),
+  fin: new THREE.MeshStandardMaterial({ color: 0x8d949c, metalness: 0.7, roughness: 0.55 }),
+  core: new THREE.MeshStandardMaterial({ color: 0x7d858f, metalness: 0.6, roughness: 0.6 }),
+  wg: new THREE.MeshStandardMaterial({ color: 0xffb020, metalness: 0.6, roughness: 0.35, emissive: 0xffb020, emissiveIntensity: 0.0 }),
+};
+
+// ---------- geometry builders ----------
+const TURB_X = -1.15, COMP_X = 1.15, R_T = 0.95, R_C = 1.08;
+
+function volute(cx, R, tube0, tube1, mat) {
+  // scroll housing: torus whose tube radius shrinks around the circumference
+  const g = new THREE.Group();
+  const path = new THREE.Curve();
+  path.getPoint = (u) => {
+    const a = -Math.PI / 2 + u * Math.PI * 2 * 0.97;
+    return new THREE.Vector3(cx, R * Math.sin(a), R * Math.cos(a));
+  };
+  const tubeGeo = new THREE.TubeGeometry(path, 96, 1, 32, false);
+  // scale cross-section progressively
+  const pos = tubeGeo.attributes.position, centre = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    const seg = Math.floor(i / 33) / 96;
+    centre.copy(path.getPoint(seg));
+    const r = lerp(tube0, tube1, seg);
+    const v = new THREE.Vector3().fromBufferAttribute(pos, i).sub(centre).multiplyScalar(r).add(centre);
+    pos.setXYZ(i, v.x, v.y, v.z);
+  }
+  tubeGeo.computeVertexNormals();
+  g.add(new THREE.Mesh(tubeGeo, mat));
+  return g;
+}
+
+function wheel(nBlades, rHub, rTip, len, twist, mat, splitters) {
+  const g = new THREE.Group();
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(rHub * 0.55, rHub, len, 32), mat);
+  hub.rotation.z = Math.PI / 2; g.add(hub);
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(rHub * 0.55, len * 0.6, 32), mat);
+  nose.rotation.z = -Math.PI / 2; nose.position.x = len * 0.8; g.add(nose);
+  const total = splitters ? nBlades * 2 : nBlades;
+  for (let i = 0; i < total; i++) {
+    const isSplit = splitters && i % 2 === 1;
+    const bl = isSplit ? len * 0.6 : len;
+    const shape = new THREE.Shape();
+    // blade profile in (axial, radial) plane: tall at back, short at front
+    shape.moveTo(-bl / 2, rHub * 0.8);
+    shape.lineTo(bl / 2, rHub * 0.6);
+    shape.quadraticCurveTo(bl * 0.1, rTip * 0.75, -bl / 2, rTip);
+    shape.lineTo(-bl / 2, rHub * 0.8);
+    const geo = new THREE.ExtrudeGeometry(shape, { depth: 0.035, bevelEnabled: false, curveSegments: 10 });
+    geo.translate(isSplit ? -len * 0.2 : 0, 0, -0.0175);
+    // twist blade along axial direction
+    const p = geo.attributes.position;
+    for (let k = 0; k < p.count; k++) {
+      const x = p.getX(k), y = p.getY(k), z = p.getZ(k);
+      const a = (x / len) * twist;
+      p.setXYZ(k, x, y * Math.cos(a) - z * Math.sin(a), y * Math.sin(a) + z * Math.cos(a));
+    }
+    geo.computeVertexNormals();
+    const m = new THREE.Mesh(geo, mat);
+    m.rotation.x = (i / total) * Math.PI * 2;
+    g.add(m);
+  }
+  return g;
+}
+
+function pipe(points, radius, mat, tension = 0.5) {
+  const curve = new THREE.CatmullRomCurve3(points.map(p => new THREE.Vector3(...p)), false, 'catmullrom', tension);
+  const mesh = new THREE.Mesh(new THREE.TubeGeometry(curve, 120, radius, 28, false), mat);
+  scene.add(mesh);
+  return curve;
+}
+
+// ---------- the turbocharger ----------
+const turbo = new THREE.Group(); scene.add(turbo);
+
+// rotating group: shaft + both wheels
+const rotor = new THREE.Group(); turbo.add(rotor);
+const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, COMP_X - TURB_X + 0.5, 24), M.steel);
+shaft.rotation.z = Math.PI / 2; rotor.add(shaft);
+const tWheel = wheel(11, 0.26, 0.72, 0.42, -0.9, M.turbineWheel, false);
+tWheel.position.x = TURB_X; tWheel.rotation.y = Math.PI; rotor.add(tWheel);
+const cWheel = wheel(7, 0.22, 0.8, 0.55, 1.1, M.compWheel, true);
+cWheel.position.x = COMP_X + 0.05; rotor.add(cWheel);
+
+// housings (cut away)
+turbo.add(volute(TURB_X, R_T, 0.42, 0.2, M.iron));
+turbo.add(volute(COMP_X, R_C, 0.48, 0.22, M.alu));
+// turbine housing walls
+function ring(x, r0, r1, mat) {
+  const m = new THREE.Mesh(new THREE.RingGeometry(r0, r1, 64), mat);
+  m.rotation.y = Math.PI / 2; m.position.x = x; turbo.add(m); return m;
+}
+ring(TURB_X + 0.3, 0.12, R_T, M.iron);
+ring(COMP_X - 0.33, 0.12, R_C, M.alu);
+// shroud around turbine/compressor wheels
+const shroudT = new THREE.Mesh(new THREE.CylinderGeometry(0.78, 0.78, 0.5, 48, 1, true), M.iron);
+shroudT.rotation.z = Math.PI / 2; shroudT.position.x = TURB_X; turbo.add(shroudT);
+// centre (bearing) housing
+const chra = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, COMP_X - TURB_X - 0.62, 40, 1, true), M.engine);
+chra.rotation.z = Math.PI / 2; turbo.add(chra);
+for (const x of [-0.45, 0.45]) {
+  const fl = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.1, 40, 1, true), M.engine);
+  fl.rotation.z = Math.PI / 2; fl.position.x = x; turbo.add(fl);
+}
+
+// ---------- engine ----------
+const ENG_Y = -3.75;
+const engine = new THREE.Group(); scene.add(engine);
+const block = new THREE.Mesh(new THREE.BoxGeometry(3.4, 1.7, 1.3), M.engine);
+block.position.set(0.0, ENG_Y, -0.05); engine.add(block);
+const head = new THREE.Mesh(new THREE.BoxGeometry(3.5, 0.45, 1.35), M.head);
+head.position.set(0.0, ENG_Y + 1.05, -0.05); engine.add(head);
+const pistons = [], flames = [];
+for (let i = 0; i < 4; i++) {
+  const x = -1.2 + i * 0.8;
+  const bore = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 1.5, 32, 1, true), M.head);
+  bore.position.set(x, ENG_Y + 0.15, -0.05); engine.add(bore);
+  const p = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.35, 32), M.piston);
+  p.position.set(x, ENG_Y, -0.05); engine.add(p); pistons.push(p);
+  const fl = new THREE.Mesh(new THREE.SphereGeometry(0.28, 24, 16),
+    new THREE.MeshBasicMaterial({ color: 0xff8a2a, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }));
+  fl.position.set(x, ENG_Y + 0.62, -0.05); fl.scale.y = 0.55; engine.add(fl); flames.push(fl);
+}
+
+// ---------- pipes & flow paths ----------
+// exhaust: manifold -> turbine volute entry (bottom, travelling +z)
+const exhaustIn = pipe([[-1.2, ENG_Y + 1.25, -0.2], [-1.25, -2.0, -0.6], [TURB_X, -1.25, -0.75], [TURB_X, -R_T - 0.02, -0.25], [TURB_X, -R_T, 0.05]], 0.27, M.pipeHot);
+// exhaust outlet (downpipe) axial -x
+const exhaustOut = pipe([[TURB_X - 0.15, 0, 0], [-2.4, 0, 0], [-2.9, -0.3, 0], [-3.2, -1.4, 0], [-3.25, -4.8, 0]], 0.32, M.pipeHot);
+// cold intake pipe, axial from +x
+const intakeIn = pipe([[3.6, 1.3, 0], [3.2, 0.2, 0], [2.6, 0, 0], [COMP_X + 0.45, 0, 0]], 0.36, M.pipeCold);
+// compressor outlet (top, travelling -z) -> intercooler -> intake manifold
+const IC = new THREE.Vector3(2.75, -2.05, -0.1);
+const boostPipe = pipe([[COMP_X, R_C, 0.02], [COMP_X, R_C + 0.05, -0.5], [1.9, 1.6, -0.75], [2.75, 0.9, -0.5], [2.75, -0.75, -0.2]], 0.24, M.pipeCold);
+const chargePipe = pipe([[2.75, -3.35, -0.2], [2.4, -3.0, -0.2], [1.6, ENG_Y + 1.25, -0.2], [1.2, ENG_Y + 1.25, -0.2]], 0.24, M.pipeCold);
+// intercooler (core with fins)
+const icGroup = new THREE.Group(); icGroup.position.copy(IC); scene.add(icGroup);
+const icCore = new THREE.Mesh(new THREE.BoxGeometry(0.5, 2.3, 1.1), M.core); icGroup.add(icCore);
+for (let i = 0; i < 26; i++) {
+  const fin = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.025, 1.16), M.fin);
+  fin.position.y = -1.1 + i * 0.088; icGroup.add(fin);
+}
+for (const y of [1.25, -1.25]) {
+  const tank = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.22, 1.2), M.alu); tank.position.y = y; icGroup.add(tank);
+}
+// wastegate bypass: branch off exhaust inlet straight to downpipe
+const wgPipe = pipe([[TURB_X - 0.1, -1.55, -0.68], [-1.95, -1.55, -0.5], [-2.45, -0.9, -0.2], [-2.45, -0.15, 0]], 0.13, M.pipeHot);
+const flap = new THREE.Group(); flap.position.set(-1.45, -1.55, -0.64); scene.add(flap);
+const flapDisc = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.04, 32), M.wg);
+flapDisc.rotation.z = Math.PI / 2; flapDisc.position.y = 0.0; flap.add(flapDisc);
+const actuator = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.22, 32), M.wg);
+actuator.position.set(-1.7, -2.1, -0.95); actuator.rotation.x = Math.PI / 2; scene.add(actuator);
+const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.55, 12), M.steel);
+rod.position.set(-1.58, -1.82, -0.8); rod.rotation.z = 0.45; scene.add(rod);
+
+// ---------- particle flows ----------
+const sprite = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d'); const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.35, 'rgba(255,255,255,.6)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, 64, 64); return new THREE.CanvasTexture(c);
+})();
+
+function flow(n, size, fn) {
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
+  const mat = new THREE.PointsMaterial({ size, map: sprite, vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true, opacity: 1 });
+  const pts = new THREE.Points(geo, mat); pts.frustumCulled = false; scene.add(pts);
+  const tmp = new THREE.Vector3(), col = new THREE.Color();
+  return {
+    mat, update(t, speed) {
+      const P = geo.attributes.position, C = geo.attributes.color;
+      for (let i = 0; i < n; i++) {
+        const u = frac(rand(i) + t * speed * (0.8 + 0.4 * rand(i + 77)));
+        fn(u, i, tmp, col);
+        P.setXYZ(i, tmp.x, tmp.y, tmp.z); C.setXYZ(i, col.r, col.g, col.b);
+      }
+      P.needsUpdate = C.needsUpdate = true;
+    }
+  };
+}
+const jitter = (v, i, s) => v.set(v.x + (rand(i + 1) - .5) * s, v.y + (rand(i + 2) - .5) * s, v.z + (rand(i + 3) - .5) * s);
+const HOT = new THREE.Color(0xff6a1a), HOT2 = new THREE.Color(0xffc34a), COLD = new THREE.Color(0x46b6ff), WARM = new THREE.Color(0xff7ad0);
+let wgOpen = 0;
+
+const exhaustFlow = flow(900, 0.16, (u, i, v, c) => {
+  // 0-0.45 pipe, 0.45-0.8 volute spiral inward, 0.8-1 axial out of downpipe
+  if (u < 0.45) { exhaustIn.getPointAt(u / 0.45, v); jitter(v, i, 0.3); }
+  else if (u < 0.8) {
+    const k = (u - 0.45) / 0.35, a = -Math.PI / 2 + k * Math.PI * 2.1;
+    const r = lerp(R_T, 0.35, smooth(k)) + (rand(i + 5) - .5) * 0.2;
+    v.set(TURB_X + (rand(i + 4) - .5) * 0.25, r * Math.sin(a), r * Math.cos(a));
+  } else {
+    const k = (u - 0.8) / 0.2; exhaustOut.getPointAt(k * 0.85, v); jitter(v, i, 0.35);
+  }
+  c.copy(HOT).lerp(HOT2, rand(i + 9) * 0.6).multiplyScalar(u > 0.8 ? 0.6 : 1);
+});
+const intakeFlow = flow(900, 0.15, (u, i, v, c) => {
+  // 0-0.25 intake pipe, 0.25-0.42 impeller (radial out), 0.42-0.55 volute, 0.55-0.75 boost pipe, 0.75-0.85 intercooler, 0.85-1 charge pipe
+  if (u < 0.25) { intakeIn.getPointAt(u / 0.25, v); jitter(v, i, 0.35); c.copy(COLD); }
+  else if (u < 0.42) {
+    const k = (u - 0.25) / 0.17, a = rand(i) * 6.283 + k * 3.0, r = lerp(0.15 + rand(i + 3) * 0.2, R_C, k);
+    v.set(lerp(COMP_X + 0.4, COMP_X - 0.05, k), r * Math.sin(a), r * Math.cos(a)); c.copy(COLD).lerp(WARM, k * 0.5);
+  } else if (u < 0.55) {
+    const k = (u - 0.42) / 0.13;
+    const aa = lerp(rand(i) * 6.283 + 3.0, Math.PI / 2 + Math.PI * 4, k);
+    const r = R_C + (rand(i + 6) - .5) * 0.25;
+    v.set(COMP_X + (rand(i + 4) - .5) * 0.3, r * Math.sin(aa), r * Math.cos(aa)); c.copy(COLD).lerp(WARM, 0.5 + k * 0.3);
+  } else if (u < 0.75) { boostPipe.getPointAt((u - 0.55) / 0.2, v); jitter(v, i, 0.22); c.copy(COLD).lerp(WARM, 0.85); }
+  else if (u < 0.85) {
+    const k = (u - 0.75) / 0.1;
+    v.set(IC.x + (rand(i + 1) - .5) * 0.4, IC.y + 1.15 - k * 2.3, IC.z + (rand(i + 2) - .5) * 0.9); c.copy(WARM).lerp(COLD, smooth(k));
+  } else { chargePipe.getPointAt((u - 0.85) / 0.15, v); jitter(v, i, 0.22); c.copy(COLD); }
+});
+const wgFlow = flow(220, 0.15, (u, i, v, c) => {
+  wgPipe.getPointAt(u, v); jitter(v, i, 0.12);
+  c.copy(HOT2).multiplyScalar(wgOpen);
+});
+
+// ---------- labels ----------
+const labelDefs = {
+  exhaust: { text: 'HOT EXHAUST', c: '#ff6a1a', p: [-1.3, -2.2, -0.4] },
+  turbine: { text: 'TURBINE', c: '#ff6a1a', p: [TURB_X - 0.3, -1.25, 0.6] },
+  turbineTop: { text: 'TURBINE', c: '#ff6a1a', p: [TURB_X, 1.45, 0] },
+  shaft: { text: 'SHAFT', c: '#9fd3ff', p: [0, 0.55, 0.3] },
+  compressor: { text: 'COMPRESSOR', c: '#46b6ff', p: [COMP_X, 1.5, 0] },
+  freshair: { text: 'FRESH AIR', c: '#46b6ff', p: [3.15, 1.55, 0] },
+  intercooler: { text: 'INTERCOOLER', c: '#46b6ff', p: [IC.x - 0.6, IC.y + 1.0, 0.8] },
+  hot: { text: 'HOT AIR', c: '#ff7ad0', p: [2.6, 1.15, -0.4] },
+  cool: { text: 'COOL, DENSE AIR', c: '#46b6ff', p: [3.5, -1.8, 0.6] },
+  wastegate: { text: 'WASTEGATE', c: '#ffb020', p: [-2.0, -0.55, -0.3] },
+  power: { text: 'MORE POWER', c: '#ffd21f', p: [-0.2, 1.9, 0] },
+};
+const labelEls = {};
+for (const [k, d] of Object.entries(labelDefs)) {
+  const el = document.createElement('div'); el.className = 'label'; el.textContent = d.text;
+  el.style.setProperty('--c', d.c); document.getElementById('labels').appendChild(el);
+  labelEls[k] = { el, pos: new THREE.Vector3(...d.p) };
+}
+
+// ---------- shots (camera position, target, fov) per scene ----------
+const shots = {
+  // pos is an offset from tgt; orbit = radians of slow orbit across the scene
+  intro:       { off: [5.0, 2.4, 9.0],   tgt: [0.3, -1.0, 0], orbit: 0.3 },
+  exhaust:     { off: [-3.0, 1.0, 6.6],  tgt: [-1.4, -2.3, -0.3], orbit: 0.08 },
+  turbine:     { off: [-3.6, 1.2, 4.6],  tgt: [TURB_X, 0.0, 0], orbit: 0.15 },
+  shaft:       { off: [0.0, 1.6, 9.0],   tgt: [0, 0.0, 0], orbit: 0.08 },
+  compressor:  { off: [3.6, 1.4, 6.2],   tgt: [COMP_X + 0.5, 0.0, 0], orbit: -0.12 },
+  intercooler: { off: [4.4, 0.8, 7.4],   tgt: [2.3, -1.4, -0.2], orbit: -0.08 },
+  power:       { off: [1.8, 1.0, 15.0],  tgt: [0.2, -2.6, 0], orbit: 0.08 },
+  wastegate:   { off: [-3.2, 0.9, 5.4],  tgt: [-1.9, -1.2, -0.4], orbit: 0.1 },
+  outro:       { off: [6.5, 2.4, 11.5],  tgt: [0.3, -1.6, 0], orbit: 0.4 },
+};
+// which labels appear in each scene
+const sceneLabels = {
+  exhaust: ['exhaust'], turbine: ['turbine'], shaft: ['turbineTop', 'shaft', 'compressor'],
+  compressor: ['compressor', 'freshair'], intercooler: ['hot', 'intercooler', 'cool'],
+  power: ['power'], wastegate: ['wastegate'],
+};
+
+const lines = timeline.lines;
+function sceneAt(t) {
+  let idx = 0;
+  for (let i = 0; i < lines.length; i++) if (t >= lines[i].s - 0.25) idx = i;
+  return idx;
+}
+function shotVectors(name, local) {
+  const s = shots[name], tgt = new THREE.Vector3(...s.tgt), off = new THREE.Vector3(...s.off);
+  off.applyAxisAngle(new THREE.Vector3(0, 1, 0), s.orbit * local);
+  return { pos: tgt.clone().add(off), tgt };
+}
+
+// ---------- captions ----------
+const capEl = document.getElementById('caption');
+const groups = [];
+for (const ln of lines) {
+  let cur = [];
+  ln.words.forEach((w, i) => {
+    cur.push(w);
+    const end = /[,.?!]$/.test(w.w) || cur.length >= 3 || i === ln.words.length - 1;
+    if (end) { groups.push({ words: cur, s: cur[0].s, e: cur[cur.length - 1].e }); cur = []; }
+  });
+}
+let lastGroup = -1;
+function updateCaption(t) {
+  let gi = -1;
+  for (let i = 0; i < groups.length; i++) if (t >= groups[i].s - 0.05) gi = i;
+  const g = groups[gi];
+  if (!g || t > g.e + 0.35) { capEl.innerHTML = ''; lastGroup = -1; return; }
+  if (gi !== lastGroup) {
+    capEl.innerHTML = g.words.map(w => `<span class="w">${w.w.replace(/[,.?!]$/, '')}</span>`).join(' ');
+    lastGroup = gi;
+  }
+  const pop = smooth((t - g.s) / 0.12);
+  capEl.style.transform = `scale(${0.85 + 0.15 * pop})`;
+  [...capEl.children].forEach((el, i) => {
+    const w = g.words[i], on = t >= w.s && t < w.e + 0.02;
+    el.classList.toggle('on', on);
+    el.style.transform = on ? 'scale(1.12)' : 'scale(1)';
+  });
+}
+
+// ---------- main render ----------
+const titleEl = document.getElementById('title'), rpmEl = document.getElementById('rpm'), rpmV = document.getElementById('rpmv');
+const boostEl = document.getElementById('boost');
+let rotorAngle = 0, lastT = 0;
+
+window.renderAt = function (t) {
+  const dt = Math.max(0, t - lastT); lastT = t;
+  const si = sceneAt(t), ln = lines[si], name = ln.scene;
+  const sceneStart = ln.s - 0.25, sceneLen = (lines[si + 1] ? lines[si + 1].s - 0.25 : timeline.duration) - sceneStart;
+  const local = clamp((t - sceneStart) / sceneLen);
+
+  // camera: ease from previous shot into this one during the first 0.9s
+  const cur = shotVectors(name, local);
+  let pos = cur.pos, tgt = cur.tgt;
+  if (si > 0) {
+    const prev = lines[si - 1];
+    const pv = shotVectors(prev.scene, 1);
+    const k = smooth((t - sceneStart) / 0.9);
+    pos = pv.pos.clone().lerp(cur.pos, k); tgt = pv.tgt.clone().lerp(cur.tgt, k);
+  }
+  camera.position.copy(pos); camera.lookAt(tgt);
+  
+
+  // turbo speed: spools up in the turbine scene and stays high
+  const spool = name === 'intro' ? 0.25 + 0.2 * local : name === 'exhaust' ? 0.45 : name === 'turbine' ? lerp(0.45, 1, smooth(local * 1.5)) : 1;
+  rotorAngle += dt * spool * 26;
+  rotor.rotation.x = rotorAngle;
+
+  // highlights
+  const is = (...n) => n.includes(name);
+  const hotGlow = is('exhaust', 'turbine', 'wastegate') ? 0.5 : 0.18;
+  M.iron.emissiveIntensity = hotGlow * 0.3;
+  M.pipeHot.emissiveIntensity = hotGlow * 0.3;
+  M.steel.emissiveIntensity = is('shaft') ? 0.6 + 0.4 * Math.sin(t * 8) : 0;
+  wgOpen = is('wastegate') ? smooth((t - sceneStart - 0.8) / 0.8) : is('outro') ? 0 : 0;
+  flap.rotation.y = wgOpen * 1.3;
+  M.wg.emissiveIntensity = is('wastegate') ? 0.35 + 0.25 * Math.sin(t * 6) : 0;
+
+  const exA = is('exhaust', 'turbine', 'wastegate') ? 1 : is('intro', 'power', 'outro') ? 0.85 : 0.3;
+  const inA = is('compressor', 'intercooler') ? 1 : is('intro', 'power', 'outro') ? 0.85 : 0.3;
+  exhaustFlow.mat.opacity = exA; intakeFlow.mat.opacity = inA; wgFlow.mat.opacity = 1;
+  exhaustFlow.update(t, 0.22 * (0.6 + spool * 0.6) * (1 - wgOpen * 0.35));
+  intakeFlow.update(t, 0.12 * (0.5 + spool * 0.7));
+  wgFlow.update(t, 0.6);
+
+  // engine: pistons + combustion flashes (stronger in power scene)
+  const rpmE = is('power') ? 3.2 : 1.6;
+  pistons.forEach((p, i) => {
+    const ph = t * rpmE * Math.PI * 2 + [0, Math.PI, Math.PI, 0][i];
+    p.position.y = ENG_Y + 0.1 + 0.32 * Math.cos(ph);
+    const fire = Math.max(0, Math.cos(ph)) ** 12;
+    flames[i].material.opacity = fire * (is('power') ? 1 : 0.35);
+    flames[i].scale.setScalar(0.8 + fire * 0.5); flames[i].scale.y *= 0.55;
+  });
+
+  // HUD: title, rpm counter, boost gauge
+  let titleHTML = '', titleOp = 0;
+  if (name === 'intro') { titleHTML = 'HOW A <span>TURBO</span><br>WORKS'; titleOp = smooth(t / 0.5); }
+  if (name === 'outro') { titleHTML = "THAT'S A <span>TURBO</span>"; titleOp = smooth((t - sceneStart - 0.3) / 0.5); }
+  if (titleEl.innerHTML !== titleHTML) titleEl.innerHTML = titleHTML;
+  titleEl.style.opacity = titleOp;
+  titleEl.style.transform = `translateY(${(1 - titleOp) * 30}px)`;
+
+  const rpmOp = is('turbine') ? smooth((t - sceneStart - 0.6) / 0.4) : 0;
+  rpmEl.style.opacity = rpmOp;
+  const rpm = lerp(20000, 150000, smooth((t - sceneStart - 0.6) / (sceneLen * 0.75)));
+  rpmV.textContent = (Math.round(rpm / 500) * 500).toLocaleString('en-US');
+
+  const boostOp = is('compressor', 'power', 'wastegate') ? smooth((t - sceneStart - 0.4) / 0.4) : 0;
+  boostEl.style.opacity = boostOp;
+  let psi = is('compressor') ? lerp(2, 14, smooth(local * 1.4)) : is('power') ? 18 : lerp(24, 16, wgOpen);
+  if (is('wastegate')) psi = wgOpen > 0 ? lerp(24, 17, wgOpen) : lerp(18, 24, smooth(local * 3));
+  psi += Math.sin(t * 17) * 0.3;
+  const ang = (-130 + 260 * psi / 30) * Math.PI / 180;
+  document.getElementById('needle').setAttribute('transform', `rotate(${ang * 180 / Math.PI})`);
+  const a0 = -130 * Math.PI / 180, r = 78;
+  const large = (ang - a0) > Math.PI ? 1 : 0;
+  document.getElementById('arc').setAttribute('d', `M ${r * Math.sin(a0)} ${-r * Math.cos(a0)} A ${r} ${r} 0 ${large} 1 ${r * Math.sin(ang)} ${-r * Math.cos(ang)}`);
+  document.getElementById('arc').setAttribute('stroke', psi > 21 ? '#ff4d2e' : '#ffb020');
+  document.getElementById('psi').textContent = `${Math.round(psi)} PSI`;
+
+  // labels
+  const want = sceneLabels[name] || [];
+  for (const [k, L] of Object.entries(labelEls)) {
+    const on = want.includes(k);
+    const op = on ? smooth((t - sceneStart - 0.5 - want.indexOf(k) * 0.35) / 0.3) : 0;
+    L.el.style.opacity = op;
+    if (op > 0) {
+      const v = L.pos.clone().project(camera);
+      L.el.style.left = `${(v.x * 0.5 + 0.5) * W}px`;
+      L.el.style.top = `${(-v.y * 0.5 + 0.5) * H}px`;
+      L.el.style.transform = `translate(-50%,-50%) scale(${0.8 + 0.2 * op})`;
+    }
+  }
+
+  updateCaption(t);
+  document.getElementById('progress').style.width = `${(t / timeline.duration) * 100}%`;
+  composer.render();
+  return true;
+};
+window.duration = timeline.duration;
+window.ready = true;
+</script>
+</body>
+</html>
