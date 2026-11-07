@@ -1,13 +1,14 @@
 # Turbo 3D short-form explainers
 
 Vertical (1080×1920, 30 fps) 3D explainer videos with an AI voice-over and
-word-by-word "karaoke" captions. Three "stories" share one 3D engine model:
+word-by-word "karaoke" captions. Four "stories" share one 3D scene:
 
 | Story | Video | Length |
 |-------|-------|--------|
 | `turbo` | How a Turbo Works: exhaust → turbine → shaft → compressor → intercooler → wastegate | ~41 s |
 | `lag` | Turbo lag: causes (low exhaust energy, rotating inertia), twin-scroll pulse separation, anti-lag | ~54 s |
 | `sc` | Supercharger vs turbo: belt-driven Roots blower vs exhaust-driven turbo, instant boost vs efficiency | ~40 s |
+| `rotary` | Rotary (Wankel) engine: epitrochoid housing, apex seals, the four strokes in three chambers, eccentric shaft (3:1), phasing gears, pros and cons | ~73 s |
 
 | Step | Tool | File |
 |------|------|------|
@@ -21,6 +22,7 @@ word-by-word "karaoke" captions. Three "stories" share one 3D engine model:
 ./build.sh            # writes ./build/how_a_turbo_works.mp4
 ./build.sh lag        # writes ./build/turbo_lag_twin_scroll_anti_lag.mp4
 ./build.sh sc         # writes ./build/supercharger_vs_turbo.mp4
+./build.sh rotary     # writes ./build/rotary_engine.mp4
 ```
 
 Requirements: Python 3 (`pip install kokoro-onnx soundfile`), Node 18+ with
@@ -37,3 +39,13 @@ Preview individual frames without rendering the whole video:
 ```bash
 node render.mjs --build build/lag --stills 2,10,25
 ```
+
+### Rotary model notes
+
+The Wankel is built from its real kinematics rather than hand-animated: the
+housing bore is the epitrochoid `x = e·cos3θ + R·cosθ, y = e·sin3θ + R·sinθ`
+(R = 1, e = 0.15), the rotor is the numerically computed inner envelope of that
+bore (apex tips run on the wall), the rotor centre orbits on the eccentric
+lobe while the rotor turns at one third of shaft speed, and the ring/stationary
+gears have 3e/2e pitch radii. Chamber fills and gas particles are rebuilt from
+the rotor and housing every frame, so the visible compression is real geometry.

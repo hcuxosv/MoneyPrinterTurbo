@@ -53,6 +53,22 @@ SCRIPTS = {
         ("turbo_pro", "A turbo recycles energy for free, so it's more efficient, but it can lag."),
         ("verdict", "Supercharger: instant punch. Turbo: efficient power. Which one would you pick?"),
     ],
+    "rotary": [
+        ("r_intro", "No pistons. No valves. Just a spinning triangle. This is the rotary engine."),
+        ("r_piston", "A normal engine slams pistons up and down, and a crankshaft turns that back into rotation."),
+        ("r_parts", "A rotary skips all that. A triangular rotor spins inside an oval-shaped housing, called an epitrochoid."),
+        ("r_seals", "Each tip carries an apex seal that slides along the wall, splitting the space into three sealed chambers."),
+        ("r_intake", "As a chamber grows, it pulls in air and fuel through the intake port."),
+        ("r_compress", "Then it shrinks, squeezing the mixture tight against the housing."),
+        ("r_power", "Two spark plugs fire, and the burning gas shoves the rotor around."),
+        ("r_exhaust", "Finally, the chamber sweeps past the exhaust port and pushes out the burnt gas."),
+        ("r_all", "All three chambers are always busy, so there's a power stroke on every turn of the shaft."),
+        ("r_shaft", "The rotor rides on an eccentric shaft, which spins three times for every single rotor turn."),
+        ("r_gears", "A fixed gear, meshing with a ring gear inside the rotor, keeps the two perfectly in sync."),
+        ("r_pros", "Fewer moving parts, silky smooth, and big power from a tiny package."),
+        ("r_cons", "The catch? Apex seals wear out, and it drinks fuel and oil."),
+        ("r_outro", "No pistons, just spin. That's the rotary engine."),
+    ],
 }
 
 VOICE = "am_michael"

@@ -558,6 +558,234 @@ const scFlow = flow(700, 0.15, (u, i, v, c) => {
 });
 scAssy.add(scFlow.pts);
 
+// ---------- piston engine detail: crankshaft + connecting rods ----------
+const CRANK_Y = ENG_Y - 0.82, THROW = 0.32;
+const crankGroup = new THREE.Group(); engine.add(crankGroup);
+const crankMain = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 3.3, 20), M.steel);
+crankMain.rotation.z = Math.PI / 2; crankMain.position.set(0, CRANK_Y, -0.05); engine.add(crankMain);
+const rods = [], crankPins = [], crankWebs = [];
+for (let i = 0; i < 4; i++) {
+  const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 1, 12), M.steel); engine.add(rod); rods.push(rod);
+  const pin = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.3, 16), M.steel);
+  pin.rotation.z = Math.PI / 2; engine.add(pin); crankPins.push(pin);
+  const web = new THREE.Mesh(new THREE.BoxGeometry(0.06, THROW + 0.2, 0.22), M.piston); engine.add(web); crankWebs.push(web);
+}
+const _up = new THREE.Vector3(0, 1, 0);
+function placeRod(rod, a, b) {
+  const d = new THREE.Vector3().subVectors(b, a);
+  rod.position.copy(a).addScaledVector(d, 0.5); rod.scale.set(1, d.length(), 1);
+  rod.quaternion.setFromUnitVectors(_up, d.normalize());
+}
+
+// ---------- rotary (Wankel) engine ----------
+const rotaryAssy = new THREE.Group(); rotaryAssy.visible = false; scene.add(rotaryAssy);
+const rotLocal = new THREE.Group(); rotLocal.rotation.z = Math.PI / 2; rotaryAssy.add(rotLocal); // major axis vertical
+const RR = 1.0, EE = 0.15, R_DEPTH = 0.7;           // generating radius, eccentricity (K = 6.7), rotor width
+const epi = (th) => new THREE.Vector2(EE * Math.cos(3 * th) + RR * Math.cos(th), EE * Math.sin(3 * th) + RR * Math.sin(th));
+const RM = {
+  housing: new THREE.MeshStandardMaterial({ color: 0x4a525c, metalness: 0.7, roughness: 0.45 }),
+  wall: new THREE.MeshStandardMaterial({ color: 0x9aa3ad, metalness: 0.9, roughness: 0.3, side: THREE.BackSide }),
+  plate: new THREE.MeshStandardMaterial({ color: 0x1a1e24, metalness: 0.5, roughness: 0.6 }),
+  rotor: new THREE.MeshStandardMaterial({ color: 0xb9bfc7, metalness: 0.85, roughness: 0.35, emissive: 0xffd21f, emissiveIntensity: 0 }),
+  pocket: new THREE.MeshStandardMaterial({ color: 0x6b7178, metalness: 0.7, roughness: 0.5 }),
+  seal: new THREE.MeshStandardMaterial({ color: 0xffd21f, metalness: 0.6, roughness: 0.3, emissive: 0xffb020, emissiveIntensity: 0.4 }),
+  gear: new THREE.MeshStandardMaterial({ color: 0xd0a040, metalness: 0.9, roughness: 0.35, emissive: 0xffb020, emissiveIntensity: 0 }),
+  shaft: new THREE.MeshStandardMaterial({ color: 0xd0d5dc, metalness: 1.0, roughness: 0.25, emissive: 0x46b6ff, emissiveIntensity: 0 }),
+  plug: new THREE.MeshStandardMaterial({ color: 0xc9c9c9, metalness: 0.2, roughness: 0.7 }),
+};
+// housing: epitrochoid bore with an offset outer contour, extruded along z
+{
+  const N = 240, outer = new THREE.Shape(), hole = new THREE.Path(), pts = [];
+  for (let k = 0; k <= N; k++) pts.push(epi((k / N) * Math.PI * 2));
+  pts.forEach((p, k) => {
+    const o = p.clone().multiplyScalar(1 + 0.32 / p.length());
+    k ? outer.lineTo(o.x, o.y) : outer.moveTo(o.x, o.y);
+  });
+  [...pts].reverse().forEach((p, k) => k ? hole.lineTo(p.x, p.y) : hole.moveTo(p.x, p.y));
+  outer.holes.push(hole);
+  const g = new THREE.ExtrudeGeometry(outer, { depth: R_DEPTH + 0.1, bevelEnabled: false, curveSegments: 4 });
+  g.translate(0, 0, -(R_DEPTH + 0.1) / 2);
+  rotLocal.add(new THREE.Mesh(g, [RM.housing, new THREE.MeshStandardMaterial({ color: 0xaab2bc, metalness: 0.9, roughness: 0.28 })]));
+  // rear side housing
+  const plateShape = new THREE.Shape(); pts.forEach((p, k) => { const o = p.clone().multiplyScalar(1 + 0.32 / p.length()); k ? plateShape.lineTo(o.x, o.y) : plateShape.moveTo(o.x, o.y); });
+  const plate = new THREE.Mesh(new THREE.ShapeGeometry(plateShape, 4), RM.plate);
+  plate.position.z = -(R_DEPTH + 0.1) / 2; rotLocal.add(plate);
+}
+// rotor = exact inner envelope of the housing (seen from the rotor), apexes at RR
+const rotorProfile = (() => {
+  const BINS = 360, minR = new Array(BINS).fill(Infinity), NA = 420, NH = 540;
+  for (let a = 0; a < NA; a++) {
+    const alpha = (a / NA) * Math.PI * 6, beta = alpha / 3;           // shaft angle, rotor angle
+    const cx = EE * Math.cos(alpha), cy = EE * Math.sin(alpha), cb = Math.cos(-beta), sb = Math.sin(-beta);
+    for (let h = 0; h < NH; h++) {
+      const p = epi((h / NH) * Math.PI * 2), x = p.x - cx, y = p.y - cy;
+      const rx = x * cb - y * sb, ry = x * sb + y * cb;                // into rotor frame
+      const ang = Math.atan2(ry, rx), r = Math.hypot(rx, ry);
+      const bin = Math.floor(((ang + 2 * Math.PI) % (2 * Math.PI)) / (2 * Math.PI) * BINS) % BINS;
+      if (r < minR[bin]) minR[bin] = r;
+    }
+  }
+  return minR.map((r, k) => {
+    const ang = (k + 0.5) / BINS * Math.PI * 2;
+    const nearApex = Math.min(...[0, 1, 2, 3].map(i => Math.abs(ang - i * 2 * Math.PI / 3)));
+    const clearance = 0.035 * smooth(nearApex / 0.12);                 // tips stay on the wall
+    return { ang, r: Math.min(r, RR) - clearance };
+  });
+})();
+const rotorObj = new THREE.Group(); rotLocal.add(rotorObj);
+{
+  const sh = new THREE.Shape();
+  rotorProfile.forEach((p, k) => { const x = p.r * Math.cos(p.ang), y = p.r * Math.sin(p.ang); k ? sh.lineTo(x, y) : sh.moveTo(x, y); });
+  const bore = new THREE.Path(); bore.absarc(0, 0, 0.5, 0, Math.PI * 2, true); sh.holes.push(bore);
+  const g = new THREE.ExtrudeGeometry(sh, { depth: R_DEPTH, bevelEnabled: true, bevelThickness: 0.02, bevelSize: 0.015, bevelSegments: 2, curveSegments: 48 });
+  g.translate(0, 0, -R_DEPTH / 2);
+  rotorObj.add(new THREE.Mesh(g, RM.rotor));
+  for (let i = 0; i < 3; i++) {
+    const a = i * 2 * Math.PI / 3;
+    // apex seal
+    const seal = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.055, R_DEPTH + 0.06), RM.seal);
+    seal.position.set((RR - 0.012) * Math.cos(a), (RR - 0.012) * Math.sin(a), 0); seal.rotation.z = a; rotorObj.add(seal);
+    // combustion recess in the middle of each flank
+    const fa = a + Math.PI / 3, fr = rotorProfile[Math.floor(fa / (2 * Math.PI) * 360) % 360].r;
+    const pocket = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.36, R_DEPTH * 0.55), RM.pocket);
+    pocket.position.set((fr - 0.005) * Math.cos(fa), (fr - 0.005) * Math.sin(fa), 0); pocket.rotation.z = fa; rotorObj.add(pocket);
+  }
+  // internal ring gear (pitch radius 3e) on the front face
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.45, 0.5, 64), RM.gear); ring.position.z = R_DEPTH / 2 + 0.005; rotorObj.add(ring);
+  for (let k = 0; k < 30; k++) {
+    const a = (k / 30) * Math.PI * 2, tooth = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.035, 0.12), RM.gear);
+    tooth.position.set(0.445 * Math.cos(a), 0.445 * Math.sin(a), R_DEPTH / 2 - 0.05); tooth.rotation.z = a; rotorObj.add(tooth);
+  }
+}
+// stationary gear (pitch radius 2e) fixed to the side housing, around the shaft
+const statGear = new THREE.Group(); statGear.position.z = R_DEPTH / 2 - 0.05; rotLocal.add(statGear);
+statGear.add(new THREE.Mesh(new THREE.CylinderGeometry(0.27, 0.27, 0.12, 40).rotateX(Math.PI / 2), RM.gear));
+for (let k = 0; k < 20; k++) {
+  const a = (k / 20) * Math.PI * 2 + Math.PI / 20, tooth = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.035, 0.12), RM.gear);
+  tooth.position.set(0.3 * Math.cos(a), 0.3 * Math.sin(a), 0); tooth.rotation.z = a; statGear.add(tooth);
+}
+// eccentric shaft: main journal on the axis, lobe offset by e (rides inside the rotor bore)
+const eShaft = new THREE.Group(); rotLocal.add(eShaft);
+eShaft.add(new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 1.8, 24).rotateX(Math.PI / 2).translate(0, 0, 0.1), RM.shaft));
+const lobe = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, R_DEPTH * 0.6, 40).rotateX(Math.PI / 2), RM.shaft);
+lobe.position.set(EE, 0, -0.08); eShaft.add(lobe);
+const shaftMark = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.05, 0.02), RM.seal); // bright stripe to count shaft turns
+shaftMark.position.set(0.0, 0, 1.012); shaftMark.scale.set(0.6, 1, 1); eShaft.add(shaftMark);
+const shaftCap = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.02, 24).rotateX(Math.PI / 2), RM.plug);
+shaftCap.position.z = 1.0; eShaft.add(shaftCap);
+// rotor counting mark: one flank painted
+const rotorMark = new THREE.Mesh(new THREE.CircleGeometry(0.09, 24), new THREE.MeshBasicMaterial({ color: 0x4dff88 }));
+rotorMark.position.set(0.7, 0, R_DEPTH / 2 + 0.03); rotorObj.add(rotorMark);
+// side ports in the rear housing + runners going backwards
+const PORTS = { intake: { a: 2.15, r: 0.78, c: 0x46b6ff }, exhaust: { a: 0.95, r: 0.78, c: 0xff6a1a } };
+const portPos = {};
+for (const [k, p] of Object.entries(PORTS)) {
+  const pos = new THREE.Vector3(p.r * Math.cos(p.a), p.r * Math.sin(p.a), -(R_DEPTH + 0.1) / 2 + 0.01);
+  portPos[k] = pos;
+  const hole = new THREE.Mesh(new THREE.CircleGeometry(0.17, 32), new THREE.MeshBasicMaterial({ color: p.c, transparent: true, opacity: 0.85 }));
+  hole.scale.set(1.5, 0.75, 1); hole.rotation.z = p.a + Math.PI / 2; hole.position.copy(pos); rotLocal.add(hole);
+  const out = pos.clone().add(new THREE.Vector3(0.7 * Math.cos(p.a), 0.7 * Math.sin(p.a), -1.5));
+  const curve = new THREE.CatmullRomCurve3([pos.clone().setZ(pos.z - 0.02), pos.clone().setZ(pos.z - 0.6), out]);
+  rotLocal.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 40, 0.16, 20, false),
+    new THREE.MeshStandardMaterial({ color: p.c, metalness: 0.5, roughness: 0.4, transparent: true, opacity: 0.55 })));
+  p.curve = curve;
+}
+// two spark plugs (leading + trailing) on the opposite side of the housing
+const PLUG_ANGLES = [-Math.PI / 2 - 0.2, -Math.PI / 2 + 0.2], plugSparks = [];
+for (const a of PLUG_ANGLES) {
+  const w = epi(a), dir = w.clone().normalize();
+  const plug = new THREE.Group(); rotLocal.add(plug);
+  plug.position.set(w.x + dir.x * 0.3, w.y + dir.y * 0.3, 0); plug.rotation.z = Math.atan2(dir.y, dir.x) - Math.PI / 2;
+  plug.add(new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.5, 16).translate(0, 0.25, 0), RM.plug));
+  plug.add(new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.12, 6).translate(0, 0.08, 0), M.steel));
+  const spark = new THREE.Mesh(new THREE.SphereGeometry(0.16, 16, 12),
+    new THREE.MeshBasicMaterial({ color: 0xbfe6ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }));
+  spark.position.set(w.x - dir.x * 0.02, w.y - dir.y * 0.02, 0.2); rotLocal.add(spark); plugSparks.push(spark);
+}
+// chambers: coloured gas fill between each rotor flank and the housing, rebuilt every frame
+const CH_N = 48, chambers = [];
+for (let i = 0; i < 3; i++) {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array((CH_N + 1) * 2 * 3), 3));
+  const idx = []; for (let k = 0; k < CH_N; k++) { const b = k * 2; idx.push(b, b + 1, b + 2, b + 1, b + 3, b + 2); }
+  g.setIndex(idx);
+  const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
+  m.frustumCulled = false; m.position.z = R_DEPTH / 2 + 0.01; rotLocal.add(m);
+  chambers.push({ mesh: m, housing: [], flank: [], phase: 0, color: new THREE.Color() });
+}
+// gas particles living inside each chamber (fixed chamber coordinates -> they squeeze & expand)
+const gasN = 450;
+const gasFlow = flow(gasN, 0.085, (u, i, v, c) => {
+  const ch = chambers[i % 3]; if (!ch.housing.length) { v.set(0, 0, 0); c.setRGB(0, 0, 0); return; }
+  const fk = 0.04 + 0.92 * rand(i + 600), s = 0.08 + 0.84 * rand(i + 700), kk = fk * CH_N, k0 = Math.floor(kk), f = kk - k0;
+  const h = ch.housing[k0].clone().lerp(ch.housing[k0 + 1], f), fl = ch.flank[k0].clone().lerp(ch.flank[k0 + 1], f);
+  const p = h.lerp(fl, s);
+  v.set(p.x, p.y, (rand(i + 800) - 0.5) * R_DEPTH * 0.9); c.copy(ch.color).multiplyScalar(0.9);
+});
+rotLocal.add(gasFlow.pts);
+const portFlows = {};
+for (const k of ['intake', 'exhaust']) {
+  const p = PORTS[k];
+  portFlows[k] = flow(160, 0.12, (u, i, v, c) => {
+    const uu = k === 'intake' ? 1 - u : u;                               // intake flows toward the port
+    p.curve.getPointAt(uu, v); jitter(v, i, 0.18); c.setHex(p.c).multiplyScalar(rotaryFlowGate[k] * (1 - 0.6 * uu));
+  });
+  rotLocal.add(portFlows[k].pts);
+}
+const rotaryFlowGate = { intake: 1, exhaust: 1 };
+let rotBeta = 0;
+// stroke from the chamber's angular position (local frame): see narration
+const STROKES = [
+  { name: 'INTAKE', from: Math.PI / 2, c: new THREE.Color(0x46b6ff) },
+  { name: 'COMPRESSION', from: Math.PI, c: new THREE.Color(0xb46bff) },
+  { name: 'POWER', from: 1.5 * Math.PI, c: new THREE.Color(0xff6a1a) },
+  { name: 'EXHAUST', from: 0, c: new THREE.Color(0x8a8f99) },
+];
+function strokeOf(phi) {
+  const p = ((phi % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+  if (p >= Math.PI / 2 && p < Math.PI) return 0;
+  if (p >= Math.PI && p < 1.5 * Math.PI) return 1;
+  if (p >= 1.5 * Math.PI) return 2;
+  return 3;
+}
+// update rotor, shaft and chambers for rotor angle beta; returns per-chamber info
+function updateRotary(beta, highlight, sparkGain) {
+  const alpha = 3 * beta, cx = EE * Math.cos(alpha), cy = EE * Math.sin(alpha);
+  rotorObj.position.set(cx, cy, 0); rotorObj.rotation.z = beta;
+  eShaft.rotation.z = alpha;
+  const info = [];
+  let spark = 0;
+  chambers.forEach((ch, i) => {
+    const t0 = beta + i * 2 * Math.PI / 3, t1 = t0 + 2 * Math.PI / 3;
+    const P = ch.mesh.geometry.attributes.position;
+    ch.housing.length = 0; ch.flank.length = 0;
+    for (let k = 0; k <= CH_N; k++) {
+      const th = lerp(t0, t1, k / CH_N), h = epi(th).multiplyScalar(0.997);
+      // rotor flank point in the same direction band: rotor-frame angle
+      const ra = (i * 2 * Math.PI / 3) + (k / CH_N) * 2 * Math.PI / 3, prof = rotorProfile[Math.min(359, Math.floor((ra % (2 * Math.PI)) / (2 * Math.PI) * 360))];
+      const fx = prof.r * Math.cos(ra + beta) + cx, fy = prof.r * Math.sin(ra + beta) + cy;
+      ch.housing.push(new THREE.Vector2(h.x, h.y)); ch.flank.push(new THREE.Vector2(fx, fy));
+      P.setXYZ(k * 2, h.x, h.y, 0); P.setXYZ(k * 2 + 1, fx, fy, 0);
+    }
+    P.needsUpdate = true; ch.mesh.geometry.computeBoundingSphere();
+    const mid = epi((t0 + t1) / 2), phi = Math.atan2(mid.y, mid.x), s = strokeOf(phi);
+    const pN = ((phi % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+    // colour: stroke colour, compression heats up, flash at ignition
+    ch.color.copy(STROKES[s].c);
+    if (s === 1) ch.color.lerp(new THREE.Color(0xff3dbb), (pN - Math.PI) / (Math.PI / 2) * 0.5);
+    const ign = Math.exp(-(((pN - 1.5 * Math.PI) / 0.18) ** 2));
+    if (s === 2) ch.color.lerp(new THREE.Color(0xffe08a), ign);
+    spark = Math.max(spark, Math.exp(-(((pN - 1.47 * Math.PI) / 0.07) ** 2)));
+    const on = highlight === null || highlight === s ? 1 : 0.18;
+    ch.mesh.material.color.copy(ch.color).multiplyScalar(on * (0.55 + 0.6 * ign * (s === 2)));
+    ch.color.multiplyScalar(on);
+    const hm = ch.housing[CH_N / 2], fm = ch.flank[CH_N / 2];
+    info.push({ stroke: s, phi: pN, center: new THREE.Vector3((hm.x + fm.x) / 2, (hm.y + fm.y) / 2, R_DEPTH / 2) });
+  });
+  plugSparks.forEach(sp => { sp.material.opacity = spark * sparkGain; sp.scale.setScalar(0.5 + spark); });
+  return info;
+}
+
 // ---------- labels ----------
 const labelDefs = {
   exhaust: { text: 'HOT EXHAUST', c: '#ff6a1a', p: [-1.3, -2.2, -0.4] },
@@ -593,6 +821,25 @@ const labelDefs = {
   canLag: { text: 'BUT IT CAN LAG', c: '#ff4d2e', p: [0.3, 0.75, 0.4] },
   vSc: { text: 'INSTANT PUNCH', c: '#4dff88', p: [0, SC_Y + 1.3, 0] },
   vTurbo: { text: 'EFFICIENT POWER', c: '#ffd21f', p: [0, 1.5, 0] },
+  // rotary story (world coordinates; the rotary sits at the origin, major axis vertical)
+  pistons: { text: 'PISTONS', c: '#ffd21f', p: [-0.4, ENG_Y + 1.0, 0.6] },
+  crankshaft2: { text: 'CRANKSHAFT', c: '#9fd3ff', p: [1.3, CRANK_Y - 0.3, 0.6] },
+  rotorL: { text: 'ROTOR', c: '#ffd21f', p: [0.3, -0.55, 0.6] },
+  housingL: { text: 'EPITROCHOID HOUSING', c: '#9fd3ff', p: [0, 1.75, 0.4] },
+  apex: { text: 'APEX SEAL', c: '#ffd21f', p: [0, 0, 0] },
+  intakePort: { text: 'INTAKE PORT', c: '#46b6ff', p: [-0.7, -1.1, 0.3] },
+  exhaustPort: { text: 'EXHAUST PORT', c: '#ff6a1a', p: [-0.7, 1.1, 0.3] },
+  plugs: { text: 'SPARK PLUGS', c: '#bfe6ff', p: [0.7, 1.0, 0.4] },
+  eshaft: { text: 'ECCENTRIC SHAFT', c: '#46b6ff', p: [0.55, 0.45, 1.0] },
+  gears: { text: 'PHASING GEARS 3 : 2', c: '#ffb020', p: [0, -0.85, 0.6] },
+  pFew: { text: 'FEWER MOVING PARTS', c: '#4dff88', p: [0, 1.85, 0] },
+  pSmooth: { text: 'SILKY SMOOTH', c: '#4dff88', p: [0, 1.47, 0] },
+  pSmall: { text: 'TINY + POWERFUL', c: '#4dff88', p: [0, -2.0, 0.3] },
+  cSeal: { text: 'SEALS WEAR OUT', c: '#ff4d2e', p: [0, 1.55, 0.4] },
+  cThirst: { text: 'THIRSTY: FUEL + OIL', c: '#ff4d2e', p: [0, -0.9, 0.4] },
+  ch0: { text: 'INTAKE', c: '#46b6ff', p: [0, 0, 0] },
+  ch1: { text: 'INTAKE', c: '#46b6ff', p: [0, 0, 0] },
+  ch2: { text: 'INTAKE', c: '#46b6ff', p: [0, 0, 0] },
 };
 const labelEls = {};
 for (const [k, d] of Object.entries(labelDefs)) {
@@ -795,6 +1042,87 @@ const stories = {
       return st;
     },
   },
+
+  rotary: {
+    shots: {
+      r_intro:    { off: [2.2, 1.0, 5.6],  tgt: [0, -0.35, 0], orbit: 0.4 },
+      r_piston:   { off: [2.4, 1.0, 6.8],  tgt: [0, ENG_Y - 0.35, 0], orbit: 0.1 },
+      r_parts:    { off: [0.8, 0.5, 5.8],  tgt: [0, -0.45, 0], orbit: 0.1 },
+      r_seals:    { off: [0.9, 0.5, 3.1],  tgt: [0, 0.35, 0], orbit: -0.1 },
+      r_intake:   { off: [0.3, 0.2, 5.6],  tgt: [0, -0.5, 0], orbit: 0.04 },
+      r_compress: { off: [0.3, 0.2, 5.6],  tgt: [0, -0.5, 0], orbit: 0.04 },
+      r_power:    { off: [0.6, 0.2, 5.4],  tgt: [0.15, -0.5, 0], orbit: 0.04 },
+      r_exhaust:  { off: [0.3, 0.2, 5.6],  tgt: [0, -0.5, 0], orbit: 0.04 },
+      r_all:      { off: [-0.5, 0.3, 5.6], tgt: [0, -0.5, 0], orbit: 0.06 },
+      r_shaft:    { off: [2.8, 1.2, 4.8],  tgt: [0, -0.3, 0.6], orbit: 0.12 },
+      r_gears:    { off: [0.7, 0.4, 3.0],  tgt: [0, -0.15, 0.3], orbit: 0.1 },
+      r_pros:     { off: [3.0, 1.4, 5.2],  tgt: [0, -0.35, 0], orbit: 0.45 },
+      r_cons:     { off: [-1.2, 0.6, 3.6], tgt: [0, 0.2, 0], orbit: 0.12 },
+      r_outro:    { off: [2.2, 1.0, 6.0],  tgt: [0, -0.35, 0], orbit: 0.5 },
+    },
+    modeAt(t) { return lines[sceneAt(t)].scene === 'r_piston' ? 'piston' : 'rotary'; },
+    // rotor angle per scene: piecewise linear, continuous. Stroke scenes move chamber 0
+    // exactly through one stroke (90 deg of travel) so the narration lines up with the motion.
+    rotorPlan() {
+      const nominal = { r_intro: 2.2, r_piston: 1.0, r_parts: 1.2, r_all: 1.0, r_pros: 3.0, r_cons: 1.2, r_outro: 2.5, r_gears: 0.8 };
+      const strokeStart = { r_intake: Math.PI / 2, r_compress: Math.PI, r_power: 1.5 * Math.PI, r_exhaust: 2 * Math.PI };
+      const plan = []; let b = 0;
+      lines.forEach((ln, i) => {
+        const s0 = ln.s - 0.25, s1 = lines[i + 1] ? lines[i + 1].s - 0.25 : timeline.duration, len = s1 - s0;
+        const next = lines[i + 1] && lines[i + 1].scene;
+        let end;
+        if (ln.scene in strokeStart) end = b + Math.PI / 2;
+        else if (ln.scene === 'r_shaft') end = b + 2 * Math.PI;      // exactly one rotor turn
+        else if (next in strokeStart) {                                  // land chamber 0 on the stroke start
+          const want = strokeStart[next] - Math.PI / 3, P = 2 * Math.PI / 3;
+          end = want + P * Math.ceil((b + 0.8 * len - want) / P);
+        } else end = b + (nominal[ln.scene] || 1.2) * len;
+        plan.push({ s0, s1, b0: b, b1: end }); b = end;
+      });
+      return plan;
+    },
+    state(name, { t, sceneStart, sceneLen, local, si }) {
+      const is = (...n) => n.includes(name);
+      const since = (x) => t - x;
+      const st = { highlight: null, chamberLabels: null, sparkGain: 1, seal: 0, gearGlow: 0, shaftGlow2: 0, rotorGlow2: 0, sealRed: 0 };
+      if (is('r_intro')) st.chamberFade = 0.6;
+      if (is('r_parts')) st.chamberFade = 0.3;
+      if (is('r_intro')) { st.title = 'THE <span>ROTARY</span><br>ENGINE'; st.titleOp = smooth(since(wordTime(si, 'this')) / 0.4); }
+      if (is('r_piston')) { st.engineRate = 1.0; st.flame = 0.9; st.labels = ['pistons', 'crankshaft2']; }
+      if (is('r_parts')) {
+        st.labels = ['rotorL', 'housingL'];
+        st.labelOp = { rotorL: smooth(since(wordTime(si, 'triangular')) / 0.3), housingL: smooth(since(wordTime(si, 'housing')) / 0.3) };
+        st.rotorGlow2 = 0.25 * smooth(since(wordTime(si, 'triangular')) / 0.3) * (1 - smooth(since(wordTime(si, 'housing')) / 0.3));
+      }
+      if (is('r_seals')) {
+        st.seal = 0.6 + 0.4 * Math.sin(t * 7); st.labels = ['apex'];
+        st.chamberFade = smooth(since(wordTime(si, 'three')) / 0.4);
+      }
+      const strokes = { r_intake: 0, r_compress: 1, r_power: 2, r_exhaust: 3 };
+      if (name in strokes) { st.highlight = strokes[name]; st.chamberLabels = 'highlight'; }
+      if (is('r_intake')) st.labels = ['intakePort'];
+      if (is('r_power')) { st.labels = ['plugs']; st.sparkGain = 1.8; st.shake = 0; }
+      if (is('r_exhaust')) st.labels = ['exhaustPort'];
+      if (is('r_all')) st.chamberLabels = 'all';
+      if (is('r_shaft')) {
+        st.shaftGlow2 = 0.35 + 0.25 * Math.sin(t * 6); st.labels = ['eshaft'];
+        const rev = local;  // rotor turns exactly once over this scene
+        st.title = `ROTOR <span>${rev.toFixed(2)}</span><br>SHAFT <span>${(3 * rev).toFixed(2)}</span>`;
+        st.titleOp = smooth(since(sceneStart + 0.2) / 0.3);
+      }
+      if (is('r_gears')) { st.gearGlow = 0.5 + 0.3 * Math.sin(t * 6); st.labels = ['gears']; }
+      if (is('r_pros')) {
+        st.labels = ['pFew', 'pSmooth', 'pSmall'];
+        st.labelOp = { pFew: smooth(since(wordTime(si, 'fewer')) / 0.25), pSmooth: smooth(since(wordTime(si, 'silky')) / 0.25), pSmall: smooth(since(wordTime(si, 'big')) / 0.25) };
+      }
+      if (is('r_cons')) {
+        st.sealRed = smooth(since(wordTime(si, 'apex')) / 0.3); st.labels = ['cSeal', 'cThirst'];
+        st.labelOp = { cSeal: st.sealRed, cThirst: smooth(since(wordTime(si, 'drinks')) / 0.25) };
+      }
+      if (is('r_outro')) { st.title = "THAT'S THE<br><span>ROTARY</span>"; st.titleOp = smooth(since(wordTime(si, "that's")) / 0.4); }
+      return st;
+    },
+  },
 };
 const story = stories[timeline.story || 'turbo'];
 const shots = story.shots;
@@ -810,6 +1138,7 @@ for (let f = 1, prev = modeAt(0); f <= timeline.duration * 30; f++) {
   const m = modeAt(f / 30); if (m !== prev) modeSwitches.push(f / 30); prev = m;
 }
 let scCrankAngle = 0;
+const rotorPlan = story.rotorPlan ? story.rotorPlan() : null;
 function shotVectors(name, local) {
   const s = shots[name], tgt = new THREE.Vector3(...s.tgt), off = new THREE.Vector3(...s.off);
   off.applyAxisAngle(new THREE.Vector3(0, 1, 0), s.orbit * local);
@@ -857,6 +1186,25 @@ window.renderAt = function (t) {
   const sceneStart = ln.s - 0.25, sceneLen = (lines[si + 1] ? lines[si + 1].s - 0.25 : timeline.duration) - sceneStart;
   const local = clamp((t - sceneStart) / sceneLen);
   S = { ...DEFAULT_STATE, ...story.state(name, { t, sceneStart, sceneLen, local, si }) };
+  // turbo / supercharger setup switch, hidden behind a wipe
+  const mode = modeAt(t);
+  scAssy.visible = mode === 'sc';
+  rotaryAssy.visible = mode === 'rotary';
+  engine.visible = mode !== 'rotary';
+  for (const o of turboObjs) o.visible = mode === 'turbo';
+  if (mode === 'turbo') divider.visible = S.twin > 0.01;
+  let wipe = null, incoming = mode;
+  for (const sw of modeSwitches) if (Math.abs(t - sw) < 0.3) { wipe = (t - sw + 0.3) / 0.6; incoming = modeAt(sw + 0.05); }
+  const wipeText = document.getElementById('wipetext');
+  wipeText.textContent = { sc: 'SUPERCHARGER', turbo: 'TURBO', piston: 'PISTON ENGINE', rotary: 'ROTARY' }[incoming];
+  wipeText.style.opacity = wipe === null ? 0 : clamp(1 - Math.abs(wipe - 0.5) * 3.5);
+  wipeText.style.transform = `translateY(-50%) scale(${wipe === null ? 1 : 0.9 + 0.2 * wipe})`;
+  const wipeEl = document.getElementById('wipe');
+  wipeEl.style.display = wipe === null ? 'none' : 'flex';
+  if (wipe !== null) {
+    const e = wipe < 0.5 ? 0.5 * smooth(wipe * 2) : 0.5 + 0.5 * smooth(wipe * 2 - 1);
+    wipeEl.style.transform = `translateX(${lerp(110, -190, e)}%) skewX(-14deg)`;
+  }
 
   // camera: ease from previous shot into this one during the first 0.9s
   const cur = shotVectors(name, local);
@@ -881,7 +1229,7 @@ window.renderAt = function (t) {
   M.turbineWheel.emissiveIntensity = 0.15 + S.wheelGlow;
   M.compWheel.emissiveIntensity = S.wheelGlow;
   flap.rotation.y = S.wgOpen * 1.3;
-  dividerMat.opacity = S.twin; divider.visible = S.twin > 0.01;
+  dividerMat.opacity = S.twin;
 
   // exhaust pulses: particles bunch into clumps released when each cylinder pair fires
   const exSpeed = S.exSpeed ?? 0.22 * (0.6 + S.spool * 0.6) * (1 - S.wgOpen * 0.35);
@@ -943,6 +1291,58 @@ window.renderAt = function (t) {
   document.getElementById('thrfill').style.height = `${S.throttle * 100}%`;
   document.getElementById('thrv').textContent = `${Math.round(S.throttle * 100)}%`;
 
+  // piston engine kinematics: crank throw + rigid connecting rod
+  if (engine.visible) {
+    const L = 0.82;
+    pistons.forEach((p, i) => {
+      const ph = t * engineRate * Math.PI * 2 + [0, Math.PI, Math.PI, 0][i], x = -1.2 + i * 0.8;
+      const pin = new THREE.Vector3(x, CRANK_Y + THROW * Math.cos(ph), -0.05 + THROW * Math.sin(ph));
+      const wristY = pin.y + Math.sqrt(L * L - (THROW * Math.sin(ph)) ** 2);
+      p.position.y = wristY + 0.1;
+      placeRod(rods[i], pin, new THREE.Vector3(x, wristY, -0.05));
+      crankPins[i].position.copy(pin);
+      crankWebs[i].position.set(x + 0.17, CRANK_Y + THROW / 2 * Math.cos(ph), -0.05 + THROW / 2 * Math.sin(ph));
+      crankWebs[i].rotation.x = ph;
+    });
+  }
+  // rotary engine
+  if (rotaryAssy.visible) {
+    let beta = 0;
+    if (rotorPlan) { const p = rotorPlan[si]; beta = lerp(p.b0, p.b1, clamp((t - p.s0) / (p.s1 - p.s0))); }
+    const info = updateRotary(beta, S.highlight ?? null, S.sparkGain ?? 1);
+    RM.seal.emissiveIntensity = 0.4 + (S.seal || 0);
+    RM.seal.emissive.setHex(S.sealRed ? 0xff2a1a : 0xffb020); RM.seal.color.setHex(S.sealRed ? 0xff4d2e : 0xffd21f);
+    RM.gear.emissiveIntensity = S.gearGlow || 0;
+    RM.shaft.emissiveIntensity = S.shaftGlow2 || 0;
+    RM.rotor.emissiveIntensity = S.rotorGlow2 || 0;
+    const chamberOp = S.chamberFade ?? 1;
+    chambers.forEach(ch => ch.mesh.material.opacity = 0.55 * chamberOp);
+    gasFlow.mat.opacity = chamberOp;
+    gasFlow.update(t, 0);
+    // port flows only while a chamber is actually open to that port
+    rotaryFlowGate.intake = info.some(c => c.stroke === 0) ? 1 : 0.2;
+    rotaryFlowGate.exhaust = info.some(c => c.stroke === 3) ? 1 : 0.2;
+    portFlows.intake.update(t, 0.7); portFlows.exhaust.update(t, 0.9);
+    // labels that ride on moving parts
+    // apex label follows whichever tip is highest on screen
+    let best = null;
+    for (let k = 0; k < 3; k++) {
+      const a = beta + k * 2 * Math.PI / 3;
+      const w = rotLocal.localToWorld(new THREE.Vector3(RR * Math.cos(a) + EE * Math.cos(3 * beta), RR * Math.sin(a) + EE * Math.sin(3 * beta), R_DEPTH / 2));
+      if (!best || w.y > best.y) best = w;
+    }
+    labelEls.apex.pos.copy(best).add(new THREE.Vector3(0, -0.22, 0));
+    info.forEach((c, i) => {
+      const L = labelEls['ch' + i]; L.pos.copy(rotLocal.localToWorld(c.center.clone()));
+      const st = STROKES[c.stroke];
+      if (L.el.textContent !== st.name) L.el.textContent = st.name;
+      L.el.style.setProperty('--c', '#' + st.c.getHexString());
+      const want = S.chamberLabels === 'all' || (S.chamberLabels === 'highlight' && c.stroke === S.highlight);
+      S.labels = S.labels.filter(k => k !== 'ch' + i).concat(want ? ['ch' + i] : []);
+      if (want) S.labelOp = { ...S.labelOp, ['ch' + i]: smooth((t - lines[si].s + 0.25 - 0.3) / 0.3) };
+    });
+  }
+
   // labels
   const want = S.labels;
   for (const [k, L] of Object.entries(labelEls)) {
@@ -958,23 +1358,6 @@ window.renderAt = function (t) {
     }
   }
 
-  // turbo / supercharger setup switch, hidden behind a wipe
-  const mode = modeAt(t);
-  scAssy.visible = mode === 'sc';
-  for (const o of turboObjs) o.visible = mode !== 'sc';
-  if (mode !== 'sc') divider.visible = S.twin > 0.01;
-  let wipe = null, incoming = mode;
-  for (const sw of modeSwitches) if (Math.abs(t - sw) < 0.3) { wipe = (t - sw + 0.3) / 0.6; incoming = modeAt(sw + 0.05); }
-  const wipeText = document.getElementById('wipetext');
-  wipeText.textContent = incoming === 'sc' ? 'SUPERCHARGER' : 'TURBO';
-  wipeText.style.opacity = wipe === null ? 0 : clamp(1 - Math.abs(wipe - 0.5) * 3.5);
-  wipeText.style.transform = `translateY(-50%) scale(${wipe === null ? 1 : 0.9 + 0.2 * wipe})`;
-  const wipeEl = document.getElementById('wipe');
-  wipeEl.style.display = wipe === null ? 'none' : 'flex';
-  if (wipe !== null) {
-    const e = wipe < 0.5 ? 0.5 * smooth(wipe * 2) : 0.5 + 0.5 * smooth(wipe * 2 - 1);
-    wipeEl.style.transform = `translateX(${lerp(110, -190, e)}%) skewX(-14deg)`;
-  }
   // supercharger drive train: crank -> belt -> blower pulley (overdriven) -> rotors
   if (scAssy.visible) {
     const crankW = engineRate * Math.PI * 2 * 0.6;          // rad/s, tied to engine speed

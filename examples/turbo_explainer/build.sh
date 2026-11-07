@@ -3,6 +3,7 @@
 #   ./build.sh          "How a Turbo Works"
 #   ./build.sh lag      "Turbo lag, twin-scroll and anti-lag"
 #   ./build.sh sc       "Supercharger vs turbo"
+#   ./build.sh rotary   "Rotary (Wankel) engine"
 set -euo pipefail
 cd "$(dirname "$0")"
 STORY=${1:-turbo}
@@ -10,7 +11,8 @@ case "$STORY" in
   turbo) NAME=how_a_turbo_works ;;
   lag)   NAME=turbo_lag_twin_scroll_anti_lag ;;
   sc)    NAME=supercharger_vs_turbo ;;
-  *) echo "unknown story: $STORY (turbo|lag|sc)"; exit 1 ;;
+  rotary) NAME=rotary_engine ;;
+  *) echo "unknown story: $STORY (turbo|lag|sc|rotary)"; exit 1 ;;
 esac
 ROOT=${BUILD:-build}
 BUILD=$ROOT/$STORY
