@@ -1,0 +1,13 @@
+{
+  "extraKnownMarketplaces": {
+    "ponytail": {
+      "source": {
+        "source": "git",
+        "url": "https://github.com/krissman/ponytail.git"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "ponytail@ponytail": true
+  }
+}
