@@ -56,6 +56,12 @@
     position: absolute; top: 46%; left: 0; right: 0; text-align: center; opacity: 0;
     color: #0b0f16; font-weight: 900; font-size: 128px; letter-spacing: -3px;
   }
+  #liftgraph { position: absolute; top: 110px; left: 90px; width: 900px; height: 290px; opacity: 0; }
+  #vtecflash {
+    position: absolute; top: 44%; left: 50%; opacity: 0; text-align: center; line-height: .95;
+    font-weight: 900; font-size: 130px; color: #ffd21f; letter-spacing: -4px; font-style: italic;
+    -webkit-text-stroke: 12px #c4161c; paint-order: stroke fill; text-shadow: 0 0 60px rgba(255,80,30,.9);
+  }
   #progress { position: absolute; left: 0; bottom: 0; height: 12px; background: #ffb020; width: 0; }
 </style>
 <script type="importmap">
@@ -78,6 +84,23 @@
     <text id="psi" y="76" text-anchor="middle" fill="#ffd21f" font-size="20" font-weight="800" font-family="Inter">0 PSI</text>
   </svg>
   <div id="throttle"><div class="bar"><div id="thrfill"></div></div><div><span class="t">THROTTLE</span><span id="thrv">0%</span></div></div>
+  <svg id="liftgraph" viewBox="0 0 900 290">
+    <rect x="2" y="2" width="896" height="286" rx="30" fill="rgba(10,14,22,.82)" stroke="#fff" stroke-width="4"/>
+    <text x="40" y="44" fill="#fff" font-family="Inter" font-weight="900" font-size="28" letter-spacing="2">VALVE LIFT</text>
+    <text id="gTag" x="860" y="44" text-anchor="end" fill="#ffd21f" font-family="Inter" font-weight="800" font-size="24"></text>
+    <line x1="40" y1="250" x2="860" y2="250" stroke="#4a5566" stroke-width="3"/>
+    <text x="40" y="278" fill="#8a96a8" font-family="Inter" font-weight="700" font-size="18">0°</text>
+    <text x="450" y="278" text-anchor="middle" fill="#8a96a8" font-family="Inter" font-weight="700" font-size="18">CRANK ANGLE</text>
+    <text x="860" y="278" text-anchor="end" fill="#8a96a8" font-family="Inter" font-weight="700" font-size="18">720°</text>
+    <path id="gWild" d="" fill="none" stroke="#ff4d2e" stroke-width="7" stroke-linejoin="round"/>
+    <path id="gMild" d="" fill="none" stroke="#46b6ff" stroke-width="7" stroke-linejoin="round"/>
+    <line id="gCursor" x1="0" y1="60" x2="0" y2="250" stroke="#fff" stroke-opacity=".35" stroke-width="3"/>
+    <circle id="gDot" r="12" fill="#ffd21f" stroke="#0b0f16" stroke-width="4"/>
+    <g id="gnTIMING" opacity="0"><line x1="46" y1="70" x2="46" y2="250" stroke="#4dff88" stroke-width="5" stroke-dasharray="10 8"/><text x="58" y="96" fill="#4dff88" font-family="Inter" font-weight="900" font-size="26">OPENS HERE</text></g>
+    <g id="gnLIFT" opacity="0"><line x1="165" y1="250" x2="165" y2="146" stroke="#4dff88" stroke-width="5"/><path d="M152 160 L165 140 L178 160 Z" fill="#4dff88"/><text x="185" y="132" fill="#4dff88" font-family="Inter" font-weight="900" font-size="26">HOW FAR</text></g>
+    <g id="gnDURATION" opacity="0"><line x1="46" y1="232" x2="285" y2="232" stroke="#4dff88" stroke-width="5"/><path d="M46 232 l14 -9 v18 Z M285 232 l-14 -9 v18 Z" fill="#4dff88"/><text x="300" y="240" fill="#4dff88" font-family="Inter" font-weight="900" font-size="26">HOW LONG</text></g>
+  </svg>
+  <div id="vtecflash">VTEC<br>ENGAGED!</div>
   <div id="labels"></div>
   <div id="wipe"></div>
   <div id="wipetext"></div>
@@ -786,6 +809,166 @@ function updateRotary(beta, highlight, sparkGain) {
   return info;
 }
 
+// ---------- valvetrain: camshaft, rockers, valves, VTEC ----------
+const valveAssy = new THREE.Group(); valveAssy.visible = false; scene.add(valveAssy);
+const CAM_Y = 1.43, CAM_Z = -0.25, CAM_BASE = 0.28, PIVOT = new THREE.Vector3(0, 1.1, -0.9);
+const LEVER_CAM = 0.65, LEVER_VALVE = 1.0, VALVE_X = [-0.35, 0.35], VALVE_Z = 0.1;
+const CRANK_C = new THREE.Vector3(0, -2.6, 0), V_THROW = 0.4, V_ROD = 1.2, BELT_X = -1.15;
+const LOBES = { mild: { lift: 0.17, dur: 105 }, wild: { lift: 0.3, dur: 150 } };
+const PEAK = 55; // cam degrees after the intake stroke starts
+// lobe lift (cam units) as a function of the lobe angle away from its nose, in degrees
+function lobeLift(kind, phiDeg) {
+  const { lift, dur } = LOBES[kind];
+  const p = ((phiDeg % 360) + 540) % 360 - 180;
+  return Math.abs(p) < dur / 2 ? lift * (0.5 + 0.5 * Math.cos(2 * Math.PI * p / dur)) : 0;
+}
+const VM = {
+  head: new THREE.MeshStandardMaterial({ color: 0x5b6470, metalness: 0.5, roughness: 0.6, side: THREE.DoubleSide, clippingPlanes: cut }),
+  bore: new THREE.MeshStandardMaterial({ color: 0x8a929c, metalness: 0.8, roughness: 0.35, side: THREE.DoubleSide, clippingPlanes: cut }),
+  cam: new THREE.MeshStandardMaterial({ color: 0xc9ced6, metalness: 0.95, roughness: 0.25 }),
+  lobeMild: new THREE.MeshStandardMaterial({ color: 0xc9ced6, metalness: 0.95, roughness: 0.25, emissive: 0x46b6ff, emissiveIntensity: 0 }),
+  lobeWild: new THREE.MeshStandardMaterial({ color: 0xe0a060, metalness: 0.95, roughness: 0.3, emissive: 0xff4d2e, emissiveIntensity: 0 }),
+  rocker: new THREE.MeshStandardMaterial({ color: 0x9aa3ad, metalness: 0.8, roughness: 0.4, transparent: true, opacity: 1, emissive: 0xffd21f, emissiveIntensity: 0 }),
+  rockerMid: new THREE.MeshStandardMaterial({ color: 0xc0503a, metalness: 0.7, roughness: 0.4, transparent: true, opacity: 1, emissive: 0xff4d2e, emissiveIntensity: 0 }),
+  pin: new THREE.MeshStandardMaterial({ color: 0x46b6ff, metalness: 0.6, roughness: 0.3, emissive: 0x46b6ff, emissiveIntensity: 0.5 }),
+  valve: new THREE.MeshStandardMaterial({ color: 0xd8dde3, metalness: 1.0, roughness: 0.22, emissive: 0xffd21f, emissiveIntensity: 0 }),
+  spring: new THREE.MeshStandardMaterial({ color: 0x2a9a55, metalness: 0.5, roughness: 0.5, emissive: 0x4dff88, emissiveIntensity: 0 }),
+  belt: new THREE.MeshStandardMaterial({ color: 0x15171b, metalness: 0.1, roughness: 0.8, emissive: 0xffd21f, emissiveIntensity: 0 }),
+  pulley: new THREE.MeshStandardMaterial({ color: 0x2b2f36, metalness: 0.7, roughness: 0.4 }),
+  oil: new THREE.MeshBasicMaterial({ color: 0x46b6ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }),
+};
+// --- camshaft with three lobes (mild | wild | mild) ---
+const camshaft = new THREE.Group(); camshaft.position.set(0, CAM_Y, CAM_Z); valveAssy.add(camshaft);
+camshaft.add(new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 2.1, 24).rotateZ(Math.PI / 2).translate(-0.35, 0, 0), VM.cam));
+function lobeMesh(kind, mat, x, w) {
+  const sh = new THREE.Shape(), N = 180;
+  for (let k = 0; k <= N; k++) {
+    const a = (k / N) * 360, r = CAM_BASE + lobeLift(kind, a);
+    // nose (a = 0) points to -y in the cam's local (y,z) plane
+    const y = -r * Math.cos(a * Math.PI / 180), z = r * Math.sin(a * Math.PI / 180);
+    k ? sh.lineTo(z, y) : sh.moveTo(z, y);
+  }
+  const g = new THREE.ExtrudeGeometry(sh, { depth: w, bevelEnabled: false, curveSegments: 4 });
+  g.translate(0, 0, -w / 2).rotateY(Math.PI / 2);         // extrude along x; shape x -> world z... (z,y) mapping
+  const m = new THREE.Mesh(g, mat); m.position.x = x; return m;
+}
+camshaft.add(lobeMesh('mild', VM.lobeMild, VALVE_X[0], 0.2), lobeMesh('wild', VM.lobeWild, 0, 0.2), lobeMesh('mild', VM.lobeMild, VALVE_X[1], 0.2));
+// --- rocker shaft + three rocker arms pivoting on it ---
+valveAssy.add(new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 1.5, 20).rotateZ(Math.PI / 2).translate(0, PIVOT.y, PIVOT.z), VM.cam));
+function rockerArm(x, mat, toValve) {
+  const g = new THREE.Group(); g.position.set(x, PIVOT.y, PIVOT.z); valveAssy.add(g);
+  const len = toValve ? LEVER_VALVE + 0.08 : LEVER_CAM + 0.2;
+  const arm = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.12, len), mat); arm.position.set(0, 0, len / 2); g.add(arm);
+  const pad = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.2, 20).rotateZ(Math.PI / 2), mat); // roller under the lobe
+  pad.position.set(0, 0.0, LEVER_CAM); g.add(pad);
+  const eye = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.2, 20).rotateZ(Math.PI / 2), mat); g.add(eye);
+  return g;
+}
+const rockerL = rockerArm(VALVE_X[0], VM.rocker, true), rockerM = rockerArm(0, VM.rockerMid, false), rockerR = rockerArm(VALVE_X[1], VM.rocker, true);
+// lost-motion spring under the middle rocker
+const lostMotion = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.5, 12), VM.spring);
+lostMotion.position.set(0, 0.75, PIVOT.z + LEVER_CAM + 0.12); valveAssy.add(lostMotion);
+// hydraulic locking pins (live inside the outer rockers until oil pressure pushes them across)
+const pinGeo = new THREE.CylinderGeometry(0.07, 0.07, 0.3, 16).rotateZ(Math.PI / 2);
+const pinA = new THREE.Mesh(pinGeo, VM.pin), pinB = new THREE.Mesh(pinGeo, VM.pin);
+pinA.position.set(0, 0, 0.78); pinB.position.set(0, 0, 0.78); rockerL.add(pinA); rockerR.add(pinB);
+const oilLine = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 1.52, 16).rotateZ(Math.PI / 2), VM.oil);
+oilLine.position.copy(PIVOT); valveAssy.add(oilLine);
+// --- valves + springs + retainers ---
+const valves = [], springs = [];
+function springGeo() {
+  const pts = []; for (let k = 0; k <= 200; k++) { const a = k / 200 * Math.PI * 2 * 7; pts.push(new THREE.Vector3(0.16 * Math.cos(a), k / 200, 0.16 * Math.sin(a))); }
+  return new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 400, 0.025, 8, false);
+}
+const SPRING_BOT = 0.1, VALVE_TOP = PIVOT.y - 0.07;
+for (const x of VALVE_X) {
+  const v = new THREE.Group(); valveAssy.add(v);
+  v.add(new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, VALVE_TOP + 0.55, 16).translate(0, (VALVE_TOP - 0.55) / 2, 0), VM.valve));
+  v.add(new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.05, 0.12, 32).translate(0, -0.55, 0), VM.valve)); // head
+  const ret = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.19, 0.05, 24).translate(0, VALVE_TOP - 0.2, 0), VM.valve); v.add(ret);
+  v.position.set(x, 0, VALVE_Z); valves.push(v);
+  const sp = new THREE.Mesh(springGeo(), VM.spring); sp.position.set(x, SPRING_BOT, VALVE_Z); valveAssy.add(sp); springs.push(sp);
+}
+// --- head, port, cylinder, piston, crank ---
+{
+  const headBlock = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.75, 1.9), VM.head); headBlock.position.set(0, -0.25, -0.2); valveAssy.add(headBlock);
+  const bore = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.62, 1.7, 48, 1, true), VM.bore); bore.position.set(0, -1.45, VALVE_Z); valveAssy.add(bore);
+}
+const portCurve = new THREE.CatmullRomCurve3([new THREE.Vector3(0, 0.15, -2.2), new THREE.Vector3(0, 0.0, -1.2), new THREE.Vector3(0, -0.2, -0.45), new THREE.Vector3(0, -0.42, VALVE_Z)]);
+valveAssy.add(new THREE.Mesh(new THREE.TubeGeometry(portCurve, 60, 0.3, 24, false), new THREE.MeshStandardMaterial({ color: 0x2a6fd6, metalness: 0.5, roughness: 0.4, side: THREE.DoubleSide, clippingPlanes: cut, transparent: true, opacity: 0.8 })));
+const vPiston = new THREE.Mesh(new THREE.CylinderGeometry(0.58, 0.58, 0.32, 40), M.piston); vPiston.position.z = VALVE_Z; valveAssy.add(vPiston);
+const vRod = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 1, 12), M.steel); valveAssy.add(vRod);
+const vCrank = new THREE.Group(); vCrank.position.copy(CRANK_C); valveAssy.add(vCrank);
+vCrank.add(new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 1.7, 20).rotateZ(Math.PI / 2).translate(-0.45, 0, 0), M.steel));
+vCrank.add(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.65, 0.4).translate(0.2, V_THROW / 2, 0), M.piston));
+vCrank.add(new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.32, 16).rotateZ(Math.PI / 2).translate(0, V_THROW, 0), M.steel));
+const vFlash = new THREE.Mesh(new THREE.SphereGeometry(0.45, 24, 16), new THREE.MeshBasicMaterial({ color: 0xff8a2a, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }));
+vFlash.scale.y = 0.4; vFlash.position.set(0, -0.75, VALVE_Z); valveAssy.add(vFlash);
+// --- timing belt: crank pulley (r) drives cam pulley (2r) -> cam turns at half crank speed ---
+const R_CP = 0.26, R_KP = 0.52;
+const camPulley = pulley(R_KP), crankPulley2 = pulley(R_CP);
+camPulley.position.set(BELT_X, CAM_Y, CAM_Z); crankPulley2.position.set(BELT_X, CRANK_C.y, CRANK_C.z); valveAssy.add(camPulley, crankPulley2);
+const tBeltCurve = (() => {
+  const pts = [];
+  for (let k = 0; k < 64; k++) {
+    const a = (k / 64) * Math.PI * 2;
+    pts.push([CAM_Y + (R_KP + 0.03) * Math.sin(a), CAM_Z + (R_KP + 0.03) * Math.cos(a)]);
+    pts.push([CRANK_C.y + (R_CP + 0.03) * Math.sin(a), CRANK_C.z + (R_CP + 0.03) * Math.cos(a)]);
+  }
+  pts.sort((p, q) => p[0] - q[0] || p[1] - q[1]);
+  const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lo = [], hi = [];
+  for (const p of pts) { while (lo.length >= 2 && cross(lo[lo.length - 2], lo[lo.length - 1], p) <= 0) lo.pop(); lo.push(p); }
+  for (const p of [...pts].reverse()) { while (hi.length >= 2 && cross(hi[hi.length - 2], hi[hi.length - 1], p) <= 0) hi.pop(); hi.push(p); }
+  return new THREE.CatmullRomCurve3(lo.slice(0, -1).concat(hi.slice(0, -1)).map(([y, z]) => new THREE.Vector3(BELT_X, y, z)), true, 'centripetal');
+})();
+valveAssy.add(new THREE.Mesh(new THREE.TubeGeometry(tBeltCurve, 300, 0.05, 10, true), VM.belt));
+const tBeltTicks = [];
+for (let k = 0; k < 34; k++) { const m = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.04, 0.04), scMat.tick); valveAssy.add(m); tBeltTicks.push(m); }
+// --- intake air: down the port and through whichever valve gap is open ---
+let valveOpen = 0;
+const vAir = flow(500, 0.11, (u, i, v, c) => {
+  const side = i % 2 ? 1 : 0;
+  if (u < 0.6) { portCurve.getPointAt(u / 0.6, v); jitter(v, i, 0.4); v.x = VALVE_X[side] * smooth(u / 0.6) + (rand(i + 5) - .5) * 0.3 * (1 - u); }
+  else {
+    const k = (u - 0.6) / 0.4, a = rand(i + 6) * 6.283, r = 0.25 + k * 0.3 * rand(i + 7);
+    v.set(VALVE_X[side] * (1 - k * 0.6) + r * Math.cos(a) * k, -0.55 - k * 0.7, VALVE_Z + r * Math.sin(a) * k);
+  }
+  c.copy(COLD).multiplyScalar(u < 0.6 ? 0.35 + 0.65 * valveOpen : valveOpen);
+});
+valveAssy.add(vAir.pts);
+let vCrankAngle = 0;
+// apply crank angle (radians, 0 = TDC at start of intake) and VTEC engagement (0..1)
+function updateValvetrain(crank, engage) {
+  const camDeg = (crank / 2) * 180 / Math.PI;           // cam turns at half crank speed
+  const phi = camDeg - PEAK;
+  camshaft.rotation.x = -(phi * Math.PI / 180);
+  const mild = lobeLift('mild', phi), wild = lobeLift('wild', phi);
+  const outer = lerp(mild, Math.max(mild, wild), engage);
+  const aOuter = outer / LEVER_CAM, aMid = wild / LEVER_CAM;
+  rockerL.rotation.x = aOuter; rockerR.rotation.x = aOuter; rockerM.rotation.x = aMid;
+  const vl = aOuter * LEVER_VALVE;
+  valves.forEach(v => v.position.y = -vl);
+  springs.forEach(sp => sp.scale.y = (VALVE_TOP - 0.2 - SPRING_BOT - vl) / 1.0);
+  lostMotion.scale.y = 1 - aMid * 0.9;
+  pinA.position.x = lerp(0, 0.18, engage); pinB.position.x = lerp(0, -0.18, engage);
+  // piston + rod + crank (crank rotates about x)
+  vCrank.rotation.x = crank;
+  const pin = new THREE.Vector3(0, CRANK_C.y + V_THROW * Math.cos(crank), CRANK_C.z + V_THROW * Math.sin(crank));
+  const wristY = pin.y + Math.sqrt(V_ROD * V_ROD - (V_THROW * Math.sin(crank)) ** 2);
+  vPiston.position.y = wristY + 0.12;
+  placeRod(vRod, pin, new THREE.Vector3(0, wristY, VALVE_Z));
+  // timing belt
+  crankPulley2.rotation.x = crank; camPulley.rotation.x = crank / 2;
+  const L = tBeltCurve.getLength(), d = crank * R_CP;
+  tBeltTicks.forEach((m, k) => { const u = frac(k / tBeltTicks.length + d / L); m.position.copy(tBeltCurve.getPointAt(u)); m.lookAt(m.position.clone().add(tBeltCurve.getTangentAt(u))); });
+  // combustion near TDC of the compression stroke (crank 360 deg)
+  const c720 = ((crank * 180 / Math.PI) % 720 + 720) % 720;
+  vFlash.material.opacity = 0.25 * Math.exp(-(((c720 - 365) / 18) ** 2));
+  valveOpen = clamp(vl / (LOBES.wild.lift / LEVER_CAM * LEVER_VALVE));
+  return { c720, mild, wild, outer, vl };
+}
+
 // ---------- labels ----------
 const labelDefs = {
   exhaust: { text: 'HOT EXHAUST', c: '#ff6a1a', p: [-1.3, -2.2, -0.4] },
@@ -838,6 +1021,19 @@ const labelDefs = {
   cSeal: { text: 'SEALS WEAR OUT', c: '#ff4d2e', p: [0, 1.55, 0.4] },
   cThirst: { text: 'THIRSTY: FUEL + OIL', c: '#ff4d2e', p: [0, -0.9, 0.4] },
   ch0: { text: 'INTAKE', c: '#46b6ff', p: [0, 0, 0] },
+  // vtec story
+  camshaft: { text: 'CAMSHAFT', c: '#9fd3ff', p: [0.45, 2.2, -0.25] },
+  lobe: { text: 'CAM LOBE', c: '#46b6ff', p: [-0.45, 1.85, 0.1] },
+  valveL: { text: 'VALVE', c: '#ffd21f', p: [0.65, -0.35, 0.35] },
+  springL: { text: 'VALVE SPRING', c: '#4dff88', p: [0.8, 0.55, 0.3] },
+  tbelt: { text: 'TIMING BELT', c: '#ffd21f', p: [BELT_X, -0.6, 0.9] },
+  crankL: { text: 'CRANKSHAFT', c: '#9fd3ff', p: [BELT_X, -2.05, 0.7] },
+  mildA: { text: 'MILD', c: '#46b6ff', p: [-0.38, 1.98, -0.25] },
+  wildL: { text: 'WILD', c: '#ff4d2e', p: [0, 2.2, -0.25] },
+  mildB: { text: 'MILD', c: '#46b6ff', p: [0.38, 1.98, -0.25] },
+  freeRock: { text: 'MIDDLE ROCKER FLOATS', c: '#ff4d2e', p: [0, 0.72, -0.2] },
+  oilL: { text: 'OIL PRESSURE', c: '#46b6ff', p: [-0.25, 0.6, -0.3] },
+  pinL: { text: 'LOCKING PINS', c: '#46b6ff', p: [0.0, 1.32, 0.0] },
   ch1: { text: 'INTAKE', c: '#46b6ff', p: [0, 0, 0] },
   ch2: { text: 'INTAKE', c: '#46b6ff', p: [0, 0, 0] },
 };
@@ -1123,6 +1319,89 @@ const stories = {
       return st;
     },
   },
+
+  vtec: {
+    shots: {
+      v_intro:    { off: [3.2, 1.2, 5.8],  tgt: [0, -0.2, 0], orbit: 0.35 },
+      v_cam:      { off: [2.3, 0.9, 3.0],  tgt: [0, 1.2, -0.2], orbit: 0.12 },
+      v_spring:   { off: [2.2, 0.4, 2.8],  tgt: [0.3, 0.35, 0.1], orbit: 0.1 },
+      v_belt:     { off: [-4.0, 0.5, 4.2], tgt: [-0.9, -0.7, 0], orbit: -0.08 },
+      v_profile:  { off: [2.6, 0.6, 4.6],  tgt: [0, 0.2, 0], orbit: 0.1 },
+      v_tradeoff: { off: [-2.4, 0.8, 4.8], tgt: [0, 0.2, 0], orbit: 0.12 },
+      v_vtec:     { off: [1.3, 1.5, 2.5],  tgt: [0, 1.25, -0.3], orbit: 0.15 },
+      v_low:      { off: [2.0, 0.7, 2.6],  tgt: [0, 1.1, -0.3], orbit: 0.1 },
+      v_engage:   { off: [0.8, 0.4, 2.9],  tgt: [0, 0.95, -0.2], orbit: -0.1 },
+      v_high:     { off: [2.6, 0.8, 4.6],  tgt: [0, 0.3, 0], orbit: 0.15 },
+      v_outro:    { off: [3.2, 1.2, 5.8],  tgt: [0, -0.2, 0], orbit: 0.45 },
+    },
+    modeAt() { return 'valve'; },
+    // crank angle plan: belt scene turns the crank exactly twice so the counters land on 2.00 / 1.00
+    crankPlan() {
+      const rate = { v_intro: 0.45, v_cam: 0.3, v_spring: 0.35, v_profile: 0.3, v_tradeoff: 0.35, v_vtec: 0.3, v_low: 0.4, v_engage: 0.55, v_high: 0.8, v_outro: 0.8 };
+      const plan = []; let c = 0;
+      lines.forEach((ln, i) => {
+        const s0 = ln.s - 0.25, s1 = lines[i + 1] ? lines[i + 1].s - 0.25 : timeline.duration;
+        const end = ln.scene === 'v_belt' ? c + 4 * Math.PI : c + 2 * Math.PI * (rate[ln.scene] || 0.4) * (s1 - s0);
+        plan.push({ s0, s1, c0: c, c1: end }); c = end;
+      });
+      return plan;
+    },
+    state(name, { t, sceneStart, sceneLen, local, si }) {
+      const is = (...n) => n.includes(name);
+      const since = (x) => t - x;
+      const st = { engage: 0, graphOp: 0, graphHigh: 0 };
+      if (is('v_intro')) { st.title = 'CAMSHAFT<br>+ <span>VTEC</span>'; st.titleOp = smooth(since(sceneStart + 0.3) / 0.4); }
+      if (is('v_cam')) {
+        st.labels = ['camshaft', 'lobe', 'valveL'];
+        st.labelOp = { camshaft: smooth(since(sceneStart + 0.4) / 0.3), lobe: smooth(since(wordTime(si, 'egg')) / 0.3), valveL: smooth(since(wordTime(si, 'valve')) / 0.3) };
+        st.lobeGlow = 0.35 * smooth(since(wordTime(si, 'egg')) / 0.3);
+      }
+      if (is('v_spring')) { st.labels = ['springL']; st.springGlow = 0.5 + 0.3 * Math.sin(t * 7); }
+      if (is('v_belt')) {
+        st.labels = ['tbelt', 'crankL'];
+        st.beltGlow = 0.25;
+        st.title = `CRANK <span>${(2 * local).toFixed(2)}</span><br>CAM <span>${local.toFixed(2)}</span>`;
+        st.titleOp = smooth(since(sceneStart + 0.3) / 0.3);
+      }
+      if (is('v_profile', 'v_tradeoff', 'v_high')) st.graphOp = smooth(since(sceneStart + 0.3) / 0.4);
+      if (is('v_profile')) {
+        st.graphNote = ['TIMING', 'LIFT', 'DURATION'].filter((_, k) => since(wordTime(si, ['how', 'far', 'long'][k])) > 0).pop() || '';
+        if (since(wordTime(si, 'timing')) < 0) st.graphNote = '';
+      }
+      if (is('v_tradeoff')) {
+        st.graphHigh = since(wordTime(si, 'wild')) > -0.1 ? 1 : 0;
+        st.graphTag = st.graphHigh ? 'WILD CAM: POWER UP HIGH' : (since(wordTime(si, 'mild')) > 0 ? 'MILD CAM: SMOOTH DOWN LOW' : '');
+      }
+      if (is('v_vtec')) {
+        st.labels = ['mildA', 'wildL', 'mildB'];
+        st.labelOp = { mildA: smooth(since(wordTime(si, 'mild')) / 0.3), mildB: smooth(since(wordTime(si, 'mild')) / 0.3), wildL: smooth(since(wordTime(si, 'aggressive')) / 0.3) };
+        st.lobeGlow = 0.5 * smooth(since(wordTime(si, 'mild')) / 0.3);
+        st.wildGlow = 0.6 * smooth(since(wordTime(si, 'aggressive')) / 0.3);
+        st.title = "HONDA <span>VTEC</span>"; st.titleOp = smooth(since(sceneStart + 0.2) / 0.3) * (1 - smooth(since(wordTime(si, 'each')) / 0.3));
+      }
+      if (is('v_low')) {
+        st.rpm = 3000 + 200 * Math.sin(t * 2); st.rpmOp = 1; st.labels = ['freeRock'];
+        st.midGlow = 0.5 + 0.3 * Math.sin(t * 8);
+      }
+      if (is('v_engage')) {
+        const tOil = wordTime(si, 'oil'), tLock = wordTime(si, 'locking');
+        st.rpm = lerp(3200, 6200, smooth(since(sceneStart) / Math.max(0.5, tOil - sceneStart))); st.rpmOp = 1;
+        st.oil = smooth(since(tOil) / 0.4);
+        st.engage = smooth(since(tOil + 0.35) / 0.5);
+        st.armsSeeThrough = 1;
+        st.labels = ['oilL', 'pinL']; st.labelOp = { oilL: st.oil, pinL: smooth(since(wordTime(si, 'pin')) / 0.3) };
+        st.vtecFlash = since(tLock) > 0 ? Math.max(0, 1 - since(tLock) / 1.4) : 0;
+        if (st.vtecFlash > 0) st.labelOp = { oilL: st.oil * (1 - st.vtecFlash), pinL: 1 - st.vtecFlash };
+      }
+      if (is('v_high', 'v_outro')) { st.engage = 1; st.oil = 0.6; st.graphHigh = 1; }
+      if (is('v_high')) {
+        st.rpm = lerp(6200, 8200, smooth(local * 1.2)); st.rpmOp = 1; st.wildGlow = 0.4;
+        st.graphTag = 'VTEC: BOTH VALVES ON THE WILD LOBE'; st.graphTop = 360;
+      }
+      if (is('v_outro')) { st.title = "THAT'S <span>VTEC</span>"; st.titleOp = smooth(since(sceneStart + 0.2) / 0.4); }
+      return st;
+    },
+  },
 };
 const story = stories[timeline.story || 'turbo'];
 const shots = story.shots;
@@ -1139,6 +1418,7 @@ for (let f = 1, prev = modeAt(0); f <= timeline.duration * 30; f++) {
 }
 let scCrankAngle = 0;
 const rotorPlan = story.rotorPlan ? story.rotorPlan() : null;
+const crankPlan = story.crankPlan ? story.crankPlan() : null;
 function shotVectors(name, local) {
   const s = shots[name], tgt = new THREE.Vector3(...s.tgt), off = new THREE.Vector3(...s.off);
   off.applyAxisAngle(new THREE.Vector3(0, 1, 0), s.orbit * local);
@@ -1190,7 +1470,8 @@ window.renderAt = function (t) {
   const mode = modeAt(t);
   scAssy.visible = mode === 'sc';
   rotaryAssy.visible = mode === 'rotary';
-  engine.visible = mode !== 'rotary';
+  valveAssy.visible = mode === 'valve';
+  engine.visible = ['turbo', 'sc', 'piston'].includes(mode);
   for (const o of turboObjs) o.visible = mode === 'turbo';
   if (mode === 'turbo') divider.visible = S.twin > 0.01;
   let wipe = null, incoming = mode;
@@ -1341,6 +1622,53 @@ window.renderAt = function (t) {
       S.labels = S.labels.filter(k => k !== 'ch' + i).concat(want ? ['ch' + i] : []);
       if (want) S.labelOp = { ...S.labelOp, ['ch' + i]: smooth((t - lines[si].s + 0.25 - 0.3) / 0.3) };
     });
+  }
+
+  // valvetrain / VTEC
+  if (valveAssy.visible) {
+    let crank = 0;
+    if (crankPlan) { const p = crankPlan[si]; crank = lerp(p.c0, p.c1, clamp((t - p.s0) / (p.s1 - p.s0))); }
+    const v = updateValvetrain(crank, S.engage || 0);
+    VM.lobeMild.emissiveIntensity = S.lobeGlow || 0;
+    VM.lobeWild.emissiveIntensity = Math.max(S.lobeGlow || 0, S.wildGlow || 0);
+    VM.spring.emissiveIntensity = (S.springGlow || 0) * 0.5;
+    VM.belt.emissiveIntensity = S.beltGlow || 0;
+    VM.rockerMid.emissiveIntensity = S.midGlow || 0;
+    const see = S.armsSeeThrough || 0;
+    VM.rocker.opacity = 1 - 0.55 * see; VM.rockerMid.opacity = 1 - 0.55 * see;
+    VM.rocker.depthWrite = VM.rockerMid.depthWrite = see < 0.5;
+    VM.pin.emissiveIntensity = 0.4 + 1.2 * (S.engage || 0) * (1 + 0.3 * Math.sin(t * 10));
+    VM.oil.opacity = 0.35 * (S.oil || 0) * (0.8 + 0.2 * Math.sin(t * 12));
+    vAir.update(t, 0.35 + 0.6 * valveOpen);
+    // lift graph
+    const g = document.getElementById('liftgraph');
+    g.style.opacity = S.graphOp || 0; g.style.top = `${S.graphTop || 110}px`;
+    if ((S.graphOp || 0) > 0) {
+      const X = (c) => 40 + c / 720 * 820, Y = (l) => 250 - l / LOBES.wild.lift * 190;
+      const path = (kind) => { let d = ''; for (let c = 0; c <= 720; c += 4) d += (c ? 'L' : 'M') + X(c).toFixed(1) + ' ' + Y(lobeLift(kind, c / 2 - PEAK)).toFixed(1); return d; };
+      if (!g.dataset.built) {
+        document.getElementById('gMild').setAttribute('d', path('mild'));
+        document.getElementById('gWild').setAttribute('d', path('wild'));
+        g.dataset.built = 1;
+      }
+      const hi = S.graphHigh || 0;
+      document.getElementById('gWild').setAttribute('stroke-opacity', 0.35 + 0.65 * hi);
+      document.getElementById('gMild').setAttribute('stroke-opacity', 1 - 0.6 * hi);
+      const cur = lerp(lobeLift('mild', v.c720 / 2 - PEAK), lobeLift('wild', v.c720 / 2 - PEAK), hi);
+      document.getElementById('gDot').setAttribute('cx', X(v.c720)); document.getElementById('gDot').setAttribute('cy', Y(cur));
+      document.getElementById('gCursor').setAttribute('x1', X(v.c720)); document.getElementById('gCursor').setAttribute('x2', X(v.c720));
+      document.getElementById('gTag').textContent = S.graphTag || '';
+      // annotate timing / lift / duration on the mild curve
+      const note = S.graphNote || '';
+      for (const k of ['TIMING', 'LIFT', 'DURATION']) document.getElementById('gn' + k).style.opacity = note === k ? 1 : 0;
+    }
+    // VTEC kick-in flash
+    const fl = document.getElementById('vtecflash');
+    fl.style.opacity = S.vtecFlash || 0;
+    fl.style.transform = `translate(-50%, -50%) scale(${1 + 0.25 * (1 - (S.vtecFlash || 0))}) rotate(-6deg)`;
+  } else {
+    document.getElementById('liftgraph').style.opacity = 0;
+    document.getElementById('vtecflash').style.opacity = 0;
   }
 
   // labels

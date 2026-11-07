@@ -1,7 +1,7 @@
 # Turbo 3D short-form explainers
 
 Vertical (1080×1920, 30 fps) 3D explainer videos with an AI voice-over and
-word-by-word "karaoke" captions. Four "stories" share one 3D scene:
+word-by-word "karaoke" captions. Five "stories" share one 3D scene:
 
 | Story | Video | Length |
 |-------|-------|--------|
@@ -9,6 +9,7 @@ word-by-word "karaoke" captions. Four "stories" share one 3D scene:
 | `lag` | Turbo lag: causes (low exhaust energy, rotating inertia), twin-scroll pulse separation, anti-lag | ~54 s |
 | `sc` | Supercharger vs turbo: belt-driven Roots blower vs exhaust-driven turbo, instant boost vs efficiency | ~40 s |
 | `rotary` | Rotary (Wankel) engine: epitrochoid housing, apex seals, the four strokes in three chambers, eccentric shaft (3:1), phasing gears, pros and cons | ~73 s |
+| `vtec` | Camshaft + VTEC: lobes, rockers, valves and springs, 2:1 timing belt, lift/duration/timing graph, Honda VTEC locking pins | ~68 s |
 
 | Step | Tool | File |
 |------|------|------|
@@ -23,6 +24,7 @@ word-by-word "karaoke" captions. Four "stories" share one 3D scene:
 ./build.sh lag        # writes ./build/turbo_lag_twin_scroll_anti_lag.mp4
 ./build.sh sc         # writes ./build/supercharger_vs_turbo.mp4
 ./build.sh rotary     # writes ./build/rotary_engine.mp4
+./build.sh vtec       # writes ./build/camshaft_and_vtec.mp4
 ```
 
 Requirements: Python 3 (`pip install kokoro-onnx soundfile`), Node 18+ with

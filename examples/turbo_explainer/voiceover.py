@@ -69,12 +69,25 @@ SCRIPTS = {
         ("r_cons", "The catch? Apex seals wear out, and it drinks fuel and oil."),
         ("r_outro", "No pistons, just spin. That's the rotary engine."),
     ],
+    "vtec": [
+        ("v_intro", "Every engine has to breathe. The camshaft decides exactly when, and how much."),
+        ("v_cam", "It's a spinning shaft covered in egg-shaped lobes. As each lobe comes around, it pushes a valve open."),
+        ("v_spring", "Then a stiff spring snaps the valve shut again, thousands of times a minute."),
+        ("v_belt", "A timing belt links it to the crankshaft, so the cam turns once for every two turns of the crank."),
+        ("v_profile", "The lobe's shape sets the valve timing, lift, and duration. How early, how far, and how long it opens."),
+        ("v_tradeoff", "Here's the problem. A mild cam is smooth and efficient down low, but runs out of breath up high. A wild cam is the opposite."),
+        ("v_vtec", "Honda's VTEC gives you both. Each pair of valves gets two mild lobes, plus one aggressive lobe in the middle."),
+        ("v_low", "At low RPM, the middle rocker arm just floats on its own spring, doing nothing."),
+        ("v_engage", "Past about fifty-five hundred RPM, oil pressure shoves a pin through all three rocker arms, locking them together."),
+        ("v_high", "Now both valves follow the big lobe. More lift, longer duration, and a second wind of power."),
+        ("v_outro", "That's VTEC. Two engines in one."),
+    ],
 }
 
 VOICE = "am_michael"
 SPEED = 1.08
 # Spoken words -> how they appear in the captions (merged into one token).
-CAPTION_MERGE = {"one hundred fifty thousand": "150,000"}
+CAPTION_MERGE = {"one hundred fifty thousand": "150,000", "fifty-five hundred": "5,500"}
 GAP = 0.25  # seconds of silence between lines
 LEAD_IN = 0.35
 
