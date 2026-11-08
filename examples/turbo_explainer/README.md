@@ -13,7 +13,7 @@ word-by-word "karaoke" captions. Five "stories" share one 3D scene:
 
 | Step | Tool | File |
 |------|------|------|
-| Script + AI voice-over + caption timings | [Kokoro](https://github.com/thewh1teagle/kokoro-onnx) neural TTS (offline, voice `am_fenrir`) | `voiceover.py` |
+| Script + AI voice-over + caption timings | [Kokoro](https://github.com/thewh1teagle/kokoro-onnx) neural TTS (offline, blended voice) | `voiceover.py` |
 | 3D scene: cut-away turbocharger, engine, intercooler, wastegate, particle air/exhaust flow, labels, HUD, captions | three.js (WebGL) | `scene.html` |
 | Frame-by-frame render + encode with audio | Playwright (headless Chromium) + ffmpeg | `render.mjs` |
 | Covers / thumbnails | `render.mjs --clean` + PIL | `thumbnails.py` |
@@ -21,8 +21,10 @@ word-by-word "karaoke" captions. Five "stories" share one 3D scene:
 ## What each video includes
 
 - ~63–67 s long (just over a minute, so it qualifies for TikTok's Creator Rewards).
-- Expressive AI voice: Kokoro voice `am_fenrir` (it measured roughly twice the pitch range of
-  `am_michael` on the same text), punctuation-driven delivery, faster hooks and calls to action.
+- Blended, more natural AI voice: each sentence is voiced with a mix of Kokoro styles
+  (`am_fenrir` + `am_puck` + `am_onyx`/`am_michael`). Punchy lines lean energetic and wider in
+  pitch, explanations lean deeper and calmer, with natural pauses between sentences; then EQ
+  warmth, light compression and a small room (`MOODS` / `VOICE_FX` in `voiceover.py`).
 - An end card asking viewers to pick the next topic (A or B in the comments).
 - A distinct 1080×1920 cover per video from `thumbnails.py`.
 

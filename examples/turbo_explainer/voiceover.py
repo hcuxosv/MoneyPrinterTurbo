@@ -13,6 +13,7 @@ import argparse
 import json
 import os
 import re
+import subprocess
 
 import numpy as np
 import soundfile as sf
@@ -91,12 +92,27 @@ SCRIPTS = {
     ],
 }
 
-# am_fenrir measured ~2x the pitch range of am_michael on the same text (more expressive)
-VOICE = "am_fenrir"
-SPEED = 1.04
+# The narrator is a blend of Kokoro voice styles (style vectors are mixed linearly).
+# All moods share the same core (fenrir) so it stays one person; the mix shifts per
+# sentence: punchy sentences lean on fenrir/puck (wide pitch range), explanations pull
+# in onyx/michael for a deeper, calmer tone. Measured on the same text:
+#   base  ~112 Hz median, 13.6 semitone range   hype ~122 Hz, 15.4 st   calm ~110 Hz, 9.9 st
+MOODS = {
+    "base": {"am_fenrir": 0.5, "am_puck": 0.25, "am_onyx": 0.25},
+    "hype": {"am_fenrir": 0.6, "am_puck": 0.35, "am_onyx": 0.05},
+    "calm": {"am_fenrir": 0.35, "am_onyx": 0.35, "am_michael": 0.3},
+}
+CALM_CUES = ("but ", "so ", "and ", "because", "that means", "the result")
+SENT_PAUSE = {".": 0.24, "!": 0.26, "?": 0.3, "…": 0.32}
+# Post-processing for a less "dry TTS" sound: warmth, a touch of presence,
+# gentle compression and a very small room.
+VOICE_FX = ("highpass=f=70,equalizer=f=140:t=q:w=1:g=3,equalizer=f=3200:t=q:w=1.2:g=2,"
+            "equalizer=f=7500:t=q:w=1:g=-2,acompressor=threshold=-20dB:ratio=2.5:attack=8:release=120:makeup=2,"
+            "aecho=0.8:0.85:28|47:0.08|0.05")
+SPEED = 1.0
 # Spoken words -> how they appear in the captions (merged into one token).
 CAPTION_MERGE = {"one hundred fifty thousand": "150,000", "fifty-five hundred": "5,500", "seven hundred": "700", "a hundred thousand": "100,000"}
-GAP = 0.3  # seconds of silence between lines
+GAP = 0.35  # seconds of silence between lines
 LEAD_IN = 0.35
 
 
@@ -153,6 +169,47 @@ def word_timings(text, audio, sr, t0):
     return out
 
 
+def mood_of(sentence, idx, n_sent, scene):
+    low = sentence.lower()
+    if scene in ("intro", "cta") or scene.endswith("_intro") or sentence.rstrip().endswith("!"):
+        return "hype"
+    if sentence.rstrip().endswith("?"):
+        return "base"
+    if idx > 0 and low.startswith(CALM_CUES):
+        return "calm"
+    return "base" if idx % 2 == 0 else "calm"
+
+
+def split_sentences(text):
+    # keep the terminal punctuation; "..." stays inside its sentence (a dramatic pause)
+    parts = re.findall(r".+?(?:(?<!\.)[.!?](?!\.)|$)(?:\s+|$)", text)
+    return [p.strip() for p in parts if p.strip()]
+
+
+def synth_line(kokoro, styles, scene, text, speed):
+    """Synthesise sentence by sentence, each with its own mood blend, and return
+    the joined audio plus (audio, sentence) pieces with their offsets for timing."""
+    sents = split_sentences(text)
+    pieces, out, t = [], [], 0.0
+    sr = 24000
+    for i, sen in enumerate(sents):
+        mood = mood_of(sen, i, len(sents), scene)
+        sp = speed * (1.04 if mood == "hype" else 0.97 if mood == "calm" else 1.0)
+        a, sr = kokoro.create(sen, voice=styles[mood], speed=sp, lang="en-us")
+        a = a.astype(np.float32)
+        idx = np.where(np.abs(a) > 0.01)[0]
+        if len(idx):
+            a = a[max(0, idx[0] - 600): idx[-1] + 1200]
+        pieces.append((t, a, sen, mood))
+        out.append(a)
+        t += len(a) / sr
+        if i < len(sents) - 1:
+            pause = SENT_PAUSE.get(sen.rstrip()[-1], 0.22)
+            out.append(np.zeros(int(pause * sr), dtype=np.float32))
+            t += pause
+    return np.concatenate(out), sr, pieces
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--models", required=True)
@@ -163,6 +220,8 @@ def main():
 
     kokoro = Kokoro(os.path.join(args.models, "kokoro-v1.0.onnx"),
                     os.path.join(args.models, "voices-v1.0.bin"))
+    styles = {m: sum(w * kokoro.get_voice_style(v) for v, w in mix.items()).astype(np.float32)
+              for m, mix in MOODS.items()}
     sr = 24000
     chunks = [np.zeros(int(LEAD_IN * sr), dtype=np.float32)]
     t = LEAD_IN
@@ -170,14 +229,11 @@ def main():
     for entry in SCRIPTS[args.story]:
         scene, text = entry[0], entry[1]
         mult = entry[2] if len(entry) > 2 else 1.0
-        audio, sr = kokoro.create(text, voice=VOICE, speed=SPEED * mult, lang="en-us")
-        audio = audio.astype(np.float32)
-        # trim leading/trailing near-silence so timings are tight
-        idx = np.where(np.abs(audio) > 0.01)[0]
-        if len(idx):
-            audio = audio[max(0, idx[0] - 600): idx[-1] + 1200]
+        audio, sr, pieces = synth_line(kokoro, styles, scene, text, SPEED * mult)
         dur = len(audio) / sr
-        wt = word_timings(text, audio, sr, t)
+        wt = []
+        for off, a, sen, mood in pieces:
+            wt += word_timings(sen, a, sr, t + off)
         for spoken, shown in CAPTION_MERGE.items():
             n = len(spoken.split())
             for i in range(len(wt) - n + 1):
@@ -188,11 +244,14 @@ def main():
         chunks.append(audio)
         chunks.append(np.zeros(int(GAP * sr), dtype=np.float32))
         t += dur + GAP
-        print(f"{scene:12s} {dur:5.2f}s  {text}")
+        print(f"{scene:12s} {dur:5.2f}s  " + " | ".join(f"[{m}] {x}" for _, _, x, m in pieces))
 
     chunks.append(np.zeros(int(1.0 * sr), dtype=np.float32))
     full = np.concatenate(chunks)
-    sf.write(os.path.join(args.out, "voice.wav"), full, sr)
+    dry = os.path.join(args.out, "voice_dry.wav")
+    sf.write(dry, full, sr)
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", dry, "-af", VOICE_FX,
+                    os.path.join(args.out, "voice.wav")], check=True)
     total_dur = len(full) / sr
     with open(os.path.join(args.out, "timeline.json"), "w") as f:
         json.dump({"story": args.story, "duration": round(total_dur, 3), "lines": lines}, f, indent=1)
