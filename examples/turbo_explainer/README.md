@@ -5,22 +5,22 @@ word-by-word "karaoke" captions. Five "stories" share one 3D scene:
 
 | Story | Video | Length |
 |-------|-------|--------|
-| `turbo` | How a Turbo Works: exhaust → turbine → shaft → compressor → intercooler → wastegate | ~41 s |
-| `lag` | Turbo lag: causes (low exhaust energy, rotating inertia), twin-scroll pulse separation, anti-lag | ~54 s |
-| `sc` | Supercharger vs turbo: belt-driven Roots blower vs exhaust-driven turbo, instant boost vs efficiency | ~40 s |
-| `rotary` | Rotary (Wankel) engine: epitrochoid housing, apex seals, the four strokes in three chambers, eccentric shaft (3:1), phasing gears, pros and cons | ~73 s |
-| `vtec` | Camshaft + VTEC: lobes, rockers, valves and springs, 2:1 timing belt, lift/duration/timing graph, Honda VTEC locking pins | ~68 s |
+| `turbo` | How a Turbo Works: exhaust → turbine → shaft → compressor → intercooler → wastegate | ~63 s |
+| `lag` | Turbo lag: causes (low exhaust energy, rotating inertia), twin-scroll pulse separation, anti-lag | ~64 s |
+| `sc` | Supercharger vs turbo: belt-driven Roots blower vs exhaust-driven turbo, instant boost vs efficiency | ~63 s |
+| `rotary` | Rotary (Wankel) engine: epitrochoid housing, apex seals, the four strokes in three chambers, eccentric shaft (3:1), phasing gears, pros and cons | ~67 s |
+| `vtec` | Camshaft + VTEC: lobes, rockers, valves and springs, 2:1 timing belt, lift/duration/timing graph, Honda VTEC locking pins | ~67 s |
 
 | Step | Tool | File |
 |------|------|------|
-| Script + AI voice-over + caption timings | [Kokoro](https://github.com/thewh1teagle/kokoro-onnx) neural TTS (offline, voice `am_michael`) | `voiceover.py` |
+| Script + AI voice-over + caption timings | [Kokoro](https://github.com/thewh1teagle/kokoro-onnx) neural TTS (offline, voice `am_fenrir`) | `voiceover.py` |
 | 3D scene: cut-away turbocharger, engine, intercooler, wastegate, particle air/exhaust flow, labels, HUD, captions | three.js (WebGL) | `scene.html` |
 | Frame-by-frame render + encode with audio | Playwright (headless Chromium) + ffmpeg | `render.mjs` |
 | Covers / thumbnails | `render.mjs --clean` + PIL | `thumbnails.py` |
 
 ## What each video includes
 
-- ~61–67 s long (just over a minute, so it qualifies for TikTok's Creator Rewards).
+- ~63–67 s long (just over a minute, so it qualifies for TikTok's Creator Rewards).
 - Expressive AI voice: Kokoro voice `am_fenrir` (it measured roughly twice the pitch range of
   `am_michael` on the same text), punctuation-driven delivery, faster hooks and calls to action.
 - An end card asking viewers to pick the next topic (A or B in the comments).
