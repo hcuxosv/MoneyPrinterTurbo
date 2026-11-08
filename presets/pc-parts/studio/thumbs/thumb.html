@@ -1,0 +1,232 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>PC parts thumbnail</title>
+<style>
+  html,body{margin:0;width:1280px;height:720px;overflow:hidden;background:#05070b;font-family:"Inter Display","Inter",sans-serif}
+  #bg{position:absolute;inset:0}
+  canvas{position:absolute;inset:0}
+  .txt{position:absolute;top:0;bottom:0;display:flex;flex-direction:column;justify-content:center;gap:6px;width:600px;z-index:2}
+  .txt.left{left:56px}.txt.right{right:56px;align-items:flex-end;text-align:right}
+  .kicker{font:800 30px/1 "Inter Display";letter-spacing:4px;color:var(--a);text-transform:uppercase;margin-bottom:10px;text-shadow:0 2px 12px #000}
+  .big{font:900 100px/0.94 "Inter Display";color:#fff;text-transform:uppercase;letter-spacing:-1px;
+       text-shadow:0 6px 0 rgba(0,0,0,.55),0 0 40px rgba(0,0,0,.6);-webkit-text-stroke:2px rgba(0,0,0,.35)}
+  .big .hl{display:inline-block;background:var(--a);color:#05070b;padding:0 16px 6px;margin:4px 0;transform:rotate(-2deg);border-radius:10px;
+       text-shadow:none;-webkit-text-stroke:0;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+  .chip{margin-top:18px;font:800 28px/1 "Inter Display";color:#fff;background:rgba(0,0,0,.55);border:3px solid var(--a);
+        padding:12px 20px;border-radius:999px;display:inline-block}
+  .num{position:absolute;top:26px;z-index:3;font:900 26px/1 "JetBrains Mono";color:#05070b;background:#fff;padding:8px 14px;border-radius:8px}
+  .num.left{left:28px}.num.right{right:28px}
+  .arrow{position:absolute;z-index:3;width:150px;height:150px}
+</style>
+<script type="importmap">{"imports":{"three":"/node_modules/three/build/three.module.js","three/addons/":"/node_modules/three/examples/jsm/"}}</script>
+</head><body>
+<div id="bg"></div>
+<div id="txt" class="txt"></div>
+<div id="num" class="num"></div>
+<script type="module">
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+const W = 1280, H = 720;
+const part = new URLSearchParams(location.search).get('part') || 'cpu';
+
+// ------------------------------------------------------------------ per-video design
+const D = {
+  cpu:     { n: 1,  side: 'left',  a: '#38e1ff', b: '#ff3fa4', kicker: 'Inside your PC', big: ['THE', '<span class="hl">BRAIN</span>'], chip: 'Billions of switches' },
+  gpu:     { n: 2,  side: 'right', a: '#7CFF4F', b: '#00b36b', kicker: 'Graphics card', big: ['HOW IT', 'DRAWS', '<span class="hl">FRAMES</span>'], chip: 'Thousands of cores' },
+  ram:     { n: 3,  side: 'left',  a: '#b77bff', b: '#ff4fd8', kicker: 'Memory explained', big: ['MORE RAM', '= <span class="hl">FASTER?</span>'], chip: 'The real answer' },
+  storage: { n: 4,  side: 'left',  a: '#ff9a2e', b: '#2e8bff', kicker: 'Storage', big: ['<span class="hl">SSD</span>', 'VS HDD'], chip: '50x faster?' },
+  board:   { n: 5,  side: 'right', a: '#2ef2c4', b: '#1a6dff', kicker: 'Motherboard', big: ['HOW IT ALL', '<span class="hl">CONNECTS</span>'], chip: 'The PC\'s nervous system' },
+  psu:     { n: 6,  side: 'left',  a: '#ffd23a', b: '#ff4b2b', kicker: 'Power supply', big: ['YOUR PC\'S', '<span class="hl">HEART</span>'], chip: 'Don\'t cheap out' },
+  cooling: { n: 7,  side: 'right', a: '#5fd4ff', b: '#ff3b1f', kicker: 'Cooling', big: ['STOP', '<span class="hl">OVER-</span>', '<span class="hl">HEATING</span>'], chip: 'Air vs liquid' },
+  laptop:  { n: 8,  side: 'left',  a: '#e8eef5', b: '#6c7cff', kicker: 'Laptop teardown', big: ['WHAT\'S', '<span class="hl">INSIDE?</span>'], chip: 'Every layer, explained' },
+  battery: { n: 9,  side: 'right', a: '#39ff88', b: '#00c2ff', kicker: 'Laptop battery', big: ['MAKE IT', '<span class="hl">LAST</span>'], chip: 'Charge it right' },
+  screen:  { n: 10, side: 'left',  a: '#ff3355', b: '#2f6bff', kicker: 'Displays', big: ['HOW', 'PIXELS', '<span class="hl">WORK</span>'], chip: 'LCD vs OLED' },
+}[part];
+document.documentElement.style.setProperty('--a', D.a);
+const txt = document.getElementById('txt');
+txt.classList.add(D.side);
+txt.innerHTML = `<div class="kicker">${D.kicker}</div><div class="big">${D.big.join('<br>')}</div><div><span class="chip">${D.chip}</span></div>`;
+const num = document.getElementById('num'); num.textContent = `PC PARTS #${D.n}`; num.classList.add(D.side === 'left' ? 'right' : 'left');
+const objX = D.side === 'left' ? 0.68 : 0.32; // where the hero object sits (0..1 of width)
+document.getElementById('bg').style.background =
+  `radial-gradient(circle at ${objX * 100}% 55%, ${D.a}55 0%, ${D.b}33 28%, transparent 60%),` +
+  `radial-gradient(circle at ${(1 - objX) * 100}% 120%, ${D.b}40 0%, transparent 55%), linear-gradient(160deg,#0b0f18,#030407)`;
+
+// ------------------------------------------------------------------ 3D setup
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(1); renderer.setSize(W, H);
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.setClearColor(0, 0);
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+{ // background gradient lives in the 3D render (the post-processing chain drops canvas transparency)
+  const c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d');
+  const lin = g.createLinearGradient(0, 0, W * 0.4, H); lin.addColorStop(0, '#0d1220'); lin.addColorStop(1, '#030407'); g.fillStyle = lin; g.fillRect(0, 0, W, H);
+  const rad = (x, y, r, stops) => { const gr = g.createRadialGradient(x, y, 0, x, y, r); stops.forEach(([o, col]) => gr.addColorStop(o, col)); g.fillStyle = gr; g.fillRect(0, 0, W, H); };
+  rad(objX * W, H * 0.55, W * 0.5, [[0, D.a + '66'], [0.35, D.b + '30'], [1, 'transparent']]);
+  rad((1 - objX) * W, H * 1.2, W * 0.55, [[0, D.b + '44'], [1, 'transparent']]);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; scene.background = t;
+}
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(renderer), 0.04).texture;
+const cam = new THREE.PerspectiveCamera(30, W / H, 0.1, 200);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x101018, 0.5));
+const key = new THREE.DirectionalLight(0xffffff, 1.7); key.position.set(5, 10, 8); scene.add(key);
+const rA = new THREE.PointLight(new THREE.Color(D.a), 70, 40, 2); rA.position.set(-6, 4, -5); scene.add(rA);
+const rB = new THREE.PointLight(new THREE.Color(D.b), 55, 40, 2); rB.position.set(7, 2, -6); scene.add(rB);
+
+const M = (c, r = 0.35, m = 1, extra = {}) => new THREE.MeshStandardMaterial({ color: c, roughness: r, metalness: m, ...extra });
+const glow = (c, k = 1.6) => (k = Math.min(k, 1.7), new THREE.MeshBasicMaterial({ color: new THREE.Color(c).multiplyScalar(k), toneMapped: false }));
+const B = (w, h, d, mat, x = 0, y = 0, z = 0, p) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y, z); (p || hero).add(m); return m; };
+const Cyl = (r, h, mat, x = 0, y = 0, z = 0, p, seg = 32) => { const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, seg), mat); m.position.set(x, y, z); (p || hero).add(m); return m; };
+const tex = (w, h, draw) => { const c = document.createElement('canvas'); c.width = w; c.height = h; draw(c.getContext('2d'), w, h); const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; return t; };
+const rnd = (() => { let s = 42; return () => (s = (s * 16807) % 2147483647) / 2147483647; })();
+const hero = new THREE.Group(); scene.add(hero);
+const pcbTex = (base, w = 512, h = 512) => tex(w, h, (g) => { g.fillStyle = base; g.fillRect(0, 0, w, h);
+  for (let i = 0; i < 260; i++) { g.strokeStyle = `rgba(255,255,255,${0.04 + rnd() * 0.08})`; g.lineWidth = 1 + rnd() * 2; g.beginPath();
+    let x = rnd() * w, y = rnd() * h; g.moveTo(x, y); x += (rnd() - 0.5) * 200; g.lineTo(x, y); y += (rnd() - 0.5) * 200; g.lineTo(x, y); g.stroke(); } });
+const fan = (r, p, bladeCol = 0x15181d, ringCol = D.a) => {
+  const f = new THREE.Group(); p.add(f);
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(r, r * 0.06, 10, 64), glow(ringCol, 2.6)); f.add(ring);
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.28, r * 0.28, 0.12, 32), M(0x22262d, 0.4, 0.6)); hub.rotation.x = Math.PI / 2; f.add(hub);
+  for (let i = 0; i < 9; i++) { const g = new THREE.Group(); g.rotation.z = i / 9 * Math.PI * 2; const b = new THREE.Mesh(new THREE.BoxGeometry(r * 0.72, r * 0.26, 0.03), M(bladeCol, 0.5, 0.2)); b.position.x = r * 0.55; b.rotation.x = 0.5; g.add(b); f.add(g); }
+  return f;
+};
+
+// ------------------------------------------------------------------ hero models
+const builders = {
+  cpu() {
+    const sub = B(4.5, 0.14, 3.75, M(0x1d4d34, 0.5, 0.2));
+    const dieT = tex(1024, 640, (g, w, h) => { g.fillStyle = '#140f22'; g.fillRect(0, 0, w, h);
+      for (let r = 0; r < 2; r++) for (let i = 0; i < 4; i++) { const x = 200 + i * 155, y = r ? 380 : 40; const gr = g.createLinearGradient(x, y, x + 140, y + 220); gr.addColorStop(0, '#59f0ff'); gr.addColorStop(1, '#ff4fd8'); g.fillStyle = gr; g.fillRect(x, y, 140, 220); }
+      g.fillStyle = '#ffb13b'; g.fillRect(200, 275, 620, 90); g.fillStyle = '#2ce6a6'; g.fillRect(30, 40, 140, 560); });
+    const dm = new THREE.MeshStandardMaterial({ map: dieT, emissiveMap: dieT, emissive: 0xffffff, emissiveIntensity: 0.55, roughness: 0.2, metalness: 0.4 });
+    const die = B(2.3, 0.07, 1.45, [M(0x111111), M(0x111111), dm, M(0x111111), M(0x111111), M(0x111111)], 0, 0.9, 0);
+    const ihs = new THREE.Group(); ihs.position.y = 2.7; hero.add(ihs);
+    B(4.1, 0.12, 3.4, M(0xc9ccd2, 0.25, 1), 0, 0, 0, ihs); B(3.3, 0.18, 2.9, M(0xb9bdc4, 0.3, 1), 0, 0.15, 0, ihs);
+    hero.rotation.set(0.55, -0.6, 0.12); return { dist: 12.5, y: 1.0 };
+  },
+  gpu() {
+    B(7.6, 1.0, 2.9, M(0x15181d, 0.45, 0.6)); // shroud
+    B(7.6, 0.12, 2.9, M(0x2a2f37, 0.3, 1), 0, -0.56, 0); // backplate
+    B(7.4, 0.06, 2.8, M(0x0d3b2a, 0.5, 0.2), 0, -0.48, 0);
+    B(2.4, 0.08, 0.25, M(0xe0b45a, 0.25, 1), -0.8, -0.5, 1.56); // gold fingers
+    B(0.12, 1.4, 3.3, M(0xb5bac2, 0.3, 1), -3.9, -0.1, 0.1); // bracket
+    B(7.62, 0.08, 0.1, glow(D.a, 2), 0, 0.3, 1.46);
+    [-2.45, 0, 2.45].forEach(x => { const f = fan(1.08, hero); f.rotation.x = -Math.PI / 2; f.position.set(x, 0.52, 0); });
+    hero.rotation.set(0.75, -0.35, 0.18); return { dist: 15.5, y: 0 };
+  },
+  ram() {
+    for (let s = 0; s < 2; s++) {
+      const g = new THREE.Group(); hero.add(g); g.position.set(s * 1.2 - 0.6, 0, s * -0.6);
+      B(6.6, 1.5, 0.06, M(0x0f2a1d, 0.5, 0.2), 0, 0, 0, g);
+      for (let i = 0; i < 8; i++) B(0.6, 0.5, 0.08, M(0x111215, 0.4, 0.3), -2.8 + i * 0.8, -0.1, 0.06, g);
+      B(6.7, 1.7, 0.16, M(s ? 0x3a2a5a : 0x22252b, 0.3, 1), 0, 0.15, 0.14, g); // heat spreader
+      B(6.6, 0.22, 0.26, glow(s ? D.b : D.a, 2.6), 0, 1.08, 0.1, g); // RGB top
+      B(6.2, 0.18, 0.08, M(0xe0b45a, 0.25, 1), 0, -0.82, 0.02, g);
+    }
+    hero.rotation.set(0.15, -0.75, -0.12); return { dist: 19, y: 0.1 };
+  },
+  storage() {
+    const ssd = new THREE.Group(); hero.add(ssd); ssd.position.set(-1.6, 1.3, 0.8); ssd.scale.setScalar(1.35);
+    B(4.4, 0.06, 1.1, M(0x0e1013, 0.5, 0.2), 0, 0, 0, ssd);
+    B(1.1, 0.1, 0.8, M(0x1b1d22, 0.3, 0.5), -0.9, 0.08, 0, ssd); B(1.1, 0.1, 0.8, M(0x1b1d22, 0.3, 0.5), 0.4, 0.08, 0, ssd);
+    B(0.6, 0.1, 0.6, M(0x2a2d33, 0.3, 0.8), 1.5, 0.08, 0, ssd); B(0.25, 0.07, 1.0, M(0xe0b45a, 0.25, 1), -2.15, 0, 0, ssd);
+    B(4.4, 0.02, 0.06, glow(D.a, 3), 0, 0.05, 0.55, ssd);
+    ssd.rotation.set(0.5, -0.3, 0.15);
+    const hdd = new THREE.Group(); hero.add(hdd); hdd.position.set(1.3, -0.8, -0.6);
+    B(3.0, 0.5, 4.0, M(0x6d727a, 0.45, 1), 0, -0.2, 0, hdd);
+    Cyl(1.3, 0.06, M(0xe8ecf2, 0.08, 1), 0, 0.1, -0.5, hdd, 64);
+    Cyl(0.25, 0.12, M(0x8a9099, 0.3, 1), 0, 0.15, -0.5, hdd);
+    const arm = B(0.16, 0.05, 1.8, M(0xb0b6bd, 0.3, 1), 0.85, 0.2, 0.5, hdd); arm.rotation.y = 0.5;
+    Cyl(0.22, 0.2, M(0x2a2d33, 0.4, 0.8), 1.15, 0.15, 1.35, hdd);
+    hdd.rotation.set(0.55, 0.4, -0.1);
+    return { dist: 12.5, y: 0.1 };
+  },
+  board() {
+    B(7, 0.12, 7, new THREE.MeshStandardMaterial({ map: pcbTex('#0b1a17'), roughness: 0.6, metalness: 0.2 }));
+    B(1.8, 0.12, 1.6, M(0xb0b5bc, 0.3, 1), -0.6, 0.12, -0.6); B(1.2, 0.08, 1.1, M(0xd7dade, 0.25, 1), -0.6, 0.22, -0.6);
+    for (let i = 0; i < 4; i++) B(0.18, 0.3, 4.2, M(0x16181c, 0.5, 0.3), 1.2 + i * 0.36, 0.2, -0.6);
+    for (let i = 0; i < 2; i++) B(0.12, 0.9, 4.0, M(0x2b2f36, 0.3, 1), 1.56 + i * 0.72, 0.6, -0.6), B(0.13, 0.08, 4.0, glow(D.a, 2.4), 1.56 + i * 0.72, 1.07, -0.6);
+    B(0.8, 0.6, 3.6, M(0x30353d, 0.35, 1), -2.6, 0.35, -0.8); B(3.4, 0.6, 0.8, M(0x30353d, 0.35, 1), -0.9, 0.35, -2.7);
+    B(5.2, 0.25, 0.25, M(0x101215, 0.5, 0.2), -0.4, 0.15, 1.5); B(5.2, 0.25, 0.25, M(0x101215, 0.5, 0.2), -0.4, 0.15, 2.6);
+    B(3.4, 0.12, 0.8, M(0x3a3f47, 0.3, 1), -1.1, 0.12, 2.05);
+    for (let i = 0; i < 14; i++) { const p = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.02, 2 + rnd() * 2), glow(D.a, 1.8)); p.position.set(-3 + rnd() * 6, 0.07, -1 + rnd() * 3); p.rotation.y = rnd() < 0.5 ? 0 : Math.PI / 2; hero.add(p); }
+    hero.rotation.set(0.62, 0.55, -0.05); return { dist: 16.5, y: -0.3 };
+  },
+  psu() {
+    B(4.2, 2.4, 4.2, M(0x16181c, 0.5, 0.6));
+    const f = fan(1.55, hero, 0x0c0d10); f.rotation.x = -Math.PI / 2; f.position.y = 1.22;
+    const grill = new THREE.Mesh(new THREE.TorusGeometry(1.75, 0.06, 8, 64), M(0x8d939b, 0.3, 1)); grill.rotation.x = Math.PI / 2; grill.position.y = 1.24; hero.add(grill);
+    B(4.22, 0.3, 0.05, glow(D.a, 2.2), 0, 0.6, 2.11);
+    const cols = [D.a, D.b, '#ffffff'];
+    for (let i = 0; i < 5; i++) {
+      const pts = [new THREE.Vector3(-1.4 + i * 0.7, -0.4, 2.1), new THREE.Vector3(-1.6 + i * 0.9, -0.9, 3.5), new THREE.Vector3(-2.2 + i * 1.2, -1.8, 4.6)];
+      const tube = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 30, 0.11, 10), M(0x111214, 0.6, 0.1)); hero.add(tube);
+      const plug = B(0.5, 0.3, 0.5, M(0x1b1d21, 0.5, 0.2), pts[2].x, pts[2].y, pts[2].z); B(0.52, 0.06, 0.3, glow(cols[i % 3], 2.5), pts[2].x, pts[2].y + 0.17, pts[2].z);
+    }
+    hero.rotation.set(0.5, -0.65, 0.05); return { dist: 14, y: 0.2 };
+  },
+  cooling() {
+    const cpuGlow = B(3.0, 0.2, 3.0, M(0x331008, 0.4, 0.2, { emissive: 0xff3b1f, emissiveIntensity: 3 }), 0, -0.25, 0);
+    B(2.4, 0.3, 2.4, M(0xc8794a, 0.3, 1));
+    for (let i = 0; i < 4; i++) Cyl(0.13, 5.6, M(0xc8794a, 0.3, 1), -0.9 + i * 0.6, 2.9, 0);
+    for (let i = 0; i < 36; i++) B(5.2, 0.045, 2.8, M(i % 6 === 0 ? 0xdde3ea : 0xb9c0c8, 0.3, 1), 0, 1.4 + i * 0.12, 0);
+    const f = fan(2.4, hero, 0x0e1116); f.position.set(0, 3.5, 1.6);
+    hero.rotation.set(0.12, -0.6, 0.05); return { dist: 17, y: 2.6 };
+  },
+  laptop() {
+    const L = [[0x9aa1ab, 0.32, 1, -1.2], [0x13402c, 0.5, 0.2, -0.2], [0x1b1d22, 0.4, 0.5, 0.75], [0x2b2f36, 0.35, 1, 1.75]];
+    L.forEach(([c, r, m, y], i) => {
+      const mat = i === 1 ? new THREE.MeshStandardMaterial({ map: pcbTex('#0f3a28'), roughness: 0.5, metalness: 0.2 }) : M(c, r, m);
+      B(5.2, i === 2 ? 0.25 : 0.12, 3.5, mat, 0, y, 0);
+    });
+    B(1.0, 0.12, 0.8, M(0xd0d4da, 0.3, 1), -1.0, -0.1, -0.3); B(0.9, 0.3, 0.9, M(0x22262c, 0.4, 0.6), 1.4, -0.05, -0.6);
+    B(3.6, 0.04, 0.12, glow(D.b, 2), 0, 0.9, 1.3);
+    for (let r = 0; r < 5; r++) for (let c = 0; c < 13; c++) B(0.32, 0.05, 0.32, M(0x0f1012, 0.6, 0.1), -2.25 + c * 0.375, 1.84, -1.2 + r * 0.42);
+    const lid = new THREE.Group(); lid.position.set(0, 1.9, -1.75); lid.rotation.x = -1.25; hero.add(lid);
+    B(5.2, 0.1, 3.5, M(0x9aa1ab, 0.3, 1), 0, 0, -1.75, lid);
+    const scr = tex(512, 340, (g, w, h) => { const gr = g.createLinearGradient(0, 0, w, h); gr.addColorStop(0, D.b); gr.addColorStop(1, '#0a0e1a'); g.fillStyle = gr; g.fillRect(0, 0, w, h); });
+    const s = new THREE.Mesh(new THREE.PlaneGeometry(4.9, 3.2), new THREE.MeshBasicMaterial({ map: scr, toneMapped: false })); s.rotation.x = Math.PI / 2; s.position.set(0, 0.06, -1.75); s.rotation.y = Math.PI; s.rotation.z = Math.PI; lid.add(s);
+    hero.rotation.set(0.42, -0.55, 0.04); return { dist: 14.5, y: 0.6 };
+  },
+  battery() {
+    B(5.6, 0.5, 3.0, M(0x202329, 0.5, 0.4), 0, -0.4, 0);
+    for (let i = 0; i < 6; i++) {
+      const x = -2.2 + (i % 3) * 2.2, z = i < 3 ? -0.7 : 0.7;
+      Cyl(0.62, 2.2, M(i < 4 ? 0x1f7a4a : 0x2a2d33, 0.35, 0.6), x, 0.95, z);
+      Cyl(0.64, 0.22, i < 4 ? glow(D.a, 1.7) : M(0x555a62, 0.4, 0.6), x, 1.55, z);
+      Cyl(0.3, 0.12, M(0xc9ccd2, 0.2, 1), x, 2.1, z);
+    }
+    B(5.6, 0.06, 0.3, M(0xd0d4da, 0.25, 1), 0, 2.18, -0.7); B(5.6, 0.06, 0.3, M(0xd0d4da, 0.25, 1), 0, 2.18, 0.7);
+    hero.rotation.set(0.45, 0.6, -0.04); return { dist: 14, y: 0.1 };
+  },
+  screen() {
+    const scr = tex(1024, 600, (g, w, h) => { const gr = g.createLinearGradient(0, 0, w, h); gr.addColorStop(0, '#ff2d55'); gr.addColorStop(0.5, '#7a2dff'); gr.addColorStop(1, '#00b3ff'); g.fillStyle = gr; g.fillRect(0, 0, w, h);
+      g.fillStyle = 'rgba(255,255,255,.15)'; for (let x = 0; x < w; x += 6) g.fillRect(x, 0, 1, h); });
+    B(6.4, 3.8, 0.2, M(0x111215, 0.4, 0.4), 0, 1.4, 0);
+    const s = new THREE.Mesh(new THREE.PlaneGeometry(6.1, 3.5), new THREE.MeshBasicMaterial({ map: scr, toneMapped: false })); s.position.set(0, 1.4, 0.11); hero.add(s);
+    B(0.4, 1.6, 0.3, M(0x2a2e35, 0.3, 1), 0, -1.0, -0.3); B(2.6, 0.12, 1.6, M(0x2a2e35, 0.3, 1), 0, -1.8, -0.2);
+    const px = new THREE.Group(); px.position.set(2.6, 1.1, 2.2); hero.add(px);
+    const cols = ['#ff2040', '#20ff60', '#2060ff'];
+    for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) for (let k = 0; k < 3; k++) B(0.16, 0.62, 0.1, glow(cols[k], 2.6), c * 0.62 + k * 0.2 - 0.8, r * 0.72 - 0.7, 0, px);
+    const lens = new THREE.Mesh(new THREE.TorusGeometry(1.25, 0.09, 12, 64), M(0xd0d4da, 0.25, 1)); lens.position.copy(px.position); hero.add(lens);
+    hero.rotation.set(0.08, -0.5, 0); return { dist: 14, y: 0.6 };
+  },
+};
+const cfg = builders[part]();
+
+// Frame the object in its half of the image.
+const box3 = new THREE.Box3().setFromObject(hero); const ctr = box3.getCenter(new THREE.Vector3());
+hero.position.sub(ctr);
+cam.position.set(0, cfg.y * 0 + 2.2, cfg.dist); cam.lookAt(0, 0, 0);
+cam.setViewOffset(W, H, (0.5 - objX) * W, -0.04 * H, W, H);
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, cam)); composer.addPass(new UnrealBloomPass(new THREE.Vector2(W, H), 0.42, 0.45, 0.92)); composer.addPass(new OutputPass());
+composer.renderTarget1.texture.format = THREE.RGBAFormat;
+composer.render();
+window.thumbReady = true;
+</script>
+</body></html>

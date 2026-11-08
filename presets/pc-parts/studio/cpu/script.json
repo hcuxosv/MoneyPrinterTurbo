@@ -1,0 +1,41 @@
+{
+  "voice": "af_heart",
+  "scenes": [
+    {"id": "hook", "lines": [
+      {"text": "This tiny square of metal and silicon... is the brain of your computer.", "speed": 0.95, "pause": 0.35},
+      {"text": "Every click, every game, every video you watch, all of it runs through here.", "speed": 1.05, "pause": 0.5}
+    ]},
+    {"id": "socket", "lines": [
+      {"text": "It lives right in the middle of the motherboard, locked into a socket.", "speed": 1.0, "pause": 0.25},
+      {"text": "And a cooler sits on top, so it doesn't cook itself.", "speed": 1.05, "pause": 0.5}
+    ]},
+    {"id": "explode", "lines": [
+      {"text": "So let's take it apart.", "speed": 1.0, "pause": 0.35},
+      {"text": "On top, the heat spreader. A metal lid that pulls heat away from the chip.", "speed": 1.0, "pause": 0.3},
+      {"text": "Underneath, the real star. A thin sliver of silicon, called the die.", "speed": 0.97, "pause": 0.3},
+      {"text": "And at the bottom, the substrate, with over a thousand tiny contacts that connect it to the rest of your PC.", "speed": 1.03, "pause": 0.5}
+    ]},
+    {"id": "cores", "lines": [
+      {"text": "Now zoom into the die.", "speed": 0.95, "pause": 0.3},
+      {"text": "These blocks are cores. Each one is its own mini brain, and most CPUs today have somewhere between six and sixteen of them, all working at the same time.", "speed": 1.03, "pause": 0.3},
+      {"text": "Right next to them is the cache. Super fast memory that keeps whatever the cores need right now, within arm's reach.", "speed": 1.03, "pause": 0.5}
+    ]},
+    {"id": "transistors", "lines": [
+      {"text": "But go deeper. And deeper.", "speed": 0.88, "pause": 0.4},
+      {"text": "Down here, everything is made of transistors. Billions of microscopic switches.", "speed": 0.95, "pause": 0.3},
+      {"text": "On. Off. On. Off.", "speed": 0.85, "pause": 0.35},
+      {"text": "Each one is just a one, or a zero. But flip billions of them, billions of times every second, and you get... everything.", "speed": 1.0, "pause": 0.6}
+    ]},
+    {"id": "clock", "lines": [
+      {"text": "Think of it like a kitchen.", "speed": 1.0, "pause": 0.25},
+      {"text": "The cores are the chefs. The cache is the counter right beside them.", "speed": 1.02, "pause": 0.25},
+      {"text": "And clock speed, measured in gigahertz, is how fast each chef works. Five gigahertz means five billion steps, every single second.", "speed": 1.0, "pause": 0.5}
+    ]},
+    {"id": "buy", "lines": [
+      {"text": "So when you're picking one, watch two numbers.", "speed": 1.0, "pause": 0.25},
+      {"text": "More cores, for multitasking, streaming and editing.", "speed": 1.02, "pause": 0.2},
+      {"text": "Higher clock speed, for snappy, smooth gaming.", "speed": 1.02, "pause": 0.3},
+      {"text": "Get that balance right, and your whole computer feels instant.", "speed": 0.97, "pause": 0.8}
+    ]}
+  ]
+}

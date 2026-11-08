@@ -1,0 +1,6 @@
+{
+  "name": "pc-parts-studio",
+  "private": true,
+  "type": "module",
+  "dependencies": { "three": "0.160.0" }
+}
