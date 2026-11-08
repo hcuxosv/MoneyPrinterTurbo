@@ -16,6 +16,15 @@ word-by-word "karaoke" captions. Five "stories" share one 3D scene:
 | Script + AI voice-over + caption timings | [Kokoro](https://github.com/thewh1teagle/kokoro-onnx) neural TTS (offline, voice `am_michael`) | `voiceover.py` |
 | 3D scene: cut-away turbocharger, engine, intercooler, wastegate, particle air/exhaust flow, labels, HUD, captions | three.js (WebGL) | `scene.html` |
 | Frame-by-frame render + encode with audio | Playwright (headless Chromium) + ffmpeg | `render.mjs` |
+| Covers / thumbnails | `render.mjs --clean` + PIL | `thumbnails.py` |
+
+## What each video includes
+
+- ~61–67 s long (just over a minute, so it qualifies for TikTok's Creator Rewards).
+- Expressive AI voice: Kokoro voice `am_fenrir` (it measured roughly twice the pitch range of
+  `am_michael` on the same text), punctuation-driven delivery, faster hooks and calls to action.
+- An end card asking viewers to pick the next topic (A or B in the comments).
+- A distinct 1080×1920 cover per video from `thumbnails.py`.
 
 ## Build
 

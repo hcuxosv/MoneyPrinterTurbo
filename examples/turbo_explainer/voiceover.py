@@ -18,77 +18,85 @@ import numpy as np
 import soundfile as sf
 from kokoro_onnx import Kokoro
 
-# story -> [(scene id, narration)]. Scene ids drive the camera/animation in scene.html.
+# story -> [(scene id, narration[, speed multiplier])]. Scene ids drive the camera/animation
+# in scene.html. Punctuation (! ? ...) is deliberate: it is what gives Kokoro its expression.
+# Every video ends on a "cta" line asking viewers to pick the next topic in the comments.
 SCRIPTS = {
     "turbo": [
-        ("intro", "Ever wondered how a turbo makes a small engine hit like a big one?"),
-        ("exhaust", "It starts with hot exhaust gas leaving the engine."),
-        ("turbine", "That gas blasts through a turbine wheel, spinning it at up to one hundred fifty thousand RPM."),
-        ("shaft", "A shaft connects the turbine to a compressor wheel on the cold side."),
-        ("compressor", "The compressor sucks in fresh air and squeezes it, packing in way more oxygen."),
-        ("intercooler", "Squeezed air gets hot, so an intercooler cools it down, making it even denser."),
-        ("power", "More air means more fuel can burn, and that means more power."),
-        ("wastegate", "When boost gets too high, a wastegate opens and lets exhaust bypass the turbine."),
-        ("outro", "Wasted energy, turned into power. That's how a turbo works."),
+        ("intro", "Ever wonder how a tiny engine can hit like a big one? It's all about the turbo! Let's look inside.", 1.1),
+        ("exhaust", "It starts with something your engine normally throws away... hot exhaust gas, often well over seven hundred degrees Celsius."),
+        ("turbine", "That gas blasts through a turbine wheel and spins it insanely fast. Well over a hundred thousand RPM!"),
+        ("shaft", "A steel shaft links that turbine to a compressor wheel on the cold side. When one spins, so does the other."),
+        ("compressor", "The compressor sucks in fresh air and crams it into the engine, packing in way more oxygen."),
+        ("intercooler", "But squeezing air makes it hot. So an intercooler cools it back down, making it even denser."),
+        ("power", "More air means you can burn more fuel... and that means more power! That extra air pressure is what we call boost."),
+        ("wastegate", "Too much boost could hurt the engine, so a wastegate opens and lets some exhaust skip the turbine."),
+        ("outro", "Energy that was going straight out the tailpipe... turned into power. That's a turbo!"),
+        ("cta", "So what should we break down next? Diesel versus gas, or how a differential works? Tell me in the comments!", 1.1),
     ],
     "lag": [
-        ("lag_intro", "You floor it, and... nothing. Then the boost hits all at once. That delay is turbo lag."),
-        ("lag_cause", "A turbo is powered by exhaust. At low RPM, the engine just doesn't make enough of it to spin the turbine fast."),
-        ("inertia", "On top of that, the wheels have mass, so it takes time to spool them up to speed."),
-        ("twinscroll", "Twin-scroll turbos fight this by splitting the turbine housing into two separate passages."),
-        ("pulses", "Cylinders are paired so their exhaust pulses don't collide, and each pulse hits the turbine harder."),
-        ("ts_result", "The result? The turbo spools sooner, with far less lag."),
-        ("antilag", "Race cars go even further, with anti-lag."),
-        ("antilag_how", "When the driver lifts off, fuel and air are fed into the hot exhaust, where they ignite and keep the turbine spinning."),
-        ("antilag_cost", "That's the pops and bangs you hear from rally cars. Instant boost, but brutal on parts."),
+        ("lag_intro", "You floor it, and... nothing. Then boom, the boost hits all at once! That delay is turbo lag.", 1.08),
+        ("lag_cause", "A turbo runs on exhaust. At low RPM, the engine just isn't making enough of it to spin the turbine fast. And the bigger the turbo, the worse it gets."),
+        ("inertia", "And the wheels have mass, so it takes time to spool them up to speed."),
+        ("twinscroll", "Twin-scroll turbos fight back by splitting the turbine housing into two separate passages."),
+        ("pulses", "Cylinders are paired so their exhaust pulses don't interfere, and each pulse hits the turbine with more energy."),
+        ("ts_result", "The result? The turbo spools sooner, with far less lag! That's why so many modern turbo engines use them."),
+        ("antilag", "Race cars take it even further... with anti-lag."),
+        ("antilag_how", "When the driver lifts off, the system retards the ignition and adds extra fuel and air, so it keeps burning in the exhaust, and the turbine never slows down."),
+        ("antilag_cost", "That's the pops and bangs you hear from rally cars! Instant boost, but brutal on parts."),
         ("outro", "That's turbo lag, and how engineers kill it."),
+        ("cta", "So what's next? Sequential turbos, or electric turbos? Drop your pick in the comments!", 1.1),
     ],
     "sc": [
-        ("sc_intro", "Superchargers and turbos both cram extra air into your engine. The difference is what drives them."),
-        ("turbo_side", "A turbo is exhaust-driven. Hot gas that would be wasted spins a turbine."),
-        ("sc_belt", "A supercharger is belt-driven, powered straight off the crankshaft."),
-        ("sc_rotors", "The belt spins a pair of rotors that force air down into the intake."),
-        ("sc_instant", "Since it's tied to engine speed, boost is instant. No lag, right off idle."),
-        ("sc_cost", "The catch? Turning it eats engine power, so it's less efficient."),
-        ("turbo_pro", "A turbo recycles energy for free, so it's more efficient, but it can lag."),
-        ("verdict", "Supercharger: instant punch. Turbo: efficient power. Which one would you pick?"),
+        ("sc_intro", "Superchargers and turbos do the same job... cram extra air into your engine. So what's the difference? It's all about what drives them!", 1.08),
+        ("turbo_side", "A turbo is exhaust-driven. Hot gas that would just blow out the tailpipe spins a turbine, which spins the compressor."),
+        ("sc_belt", "A supercharger is belt-driven. A belt connects it straight to the crankshaft, so it spins whenever the engine spins."),
+        ("sc_rotors", "In a Roots-style blower like this one, two twisted rotors mesh together and shove air down into the intake."),
+        ("sc_instant", "Because it's tied to engine speed, the boost is right there the instant you hit the throttle. No lag at all!"),
+        ("sc_cost", "But here's the catch. Spinning that blower eats engine power, sometimes tens of horsepower, so it's less efficient."),
+        ("turbo_pro", "A turbo mostly runs on energy that was being wasted anyway, so it's more efficient... but it can lag."),
+        ("verdict", "Supercharger: instant punch. Turbo: efficient power. And some cars, like the Lancia Delta S4, even run both!"),
+        ("cta", "So what should we cover next? Twincharging, or centrifugal superchargers? Let me know in the comments!", 1.1),
     ],
     "rotary": [
-        ("r_intro", "No pistons. No valves. Just a spinning triangle. This is the rotary engine."),
-        ("r_piston", "A normal engine slams pistons up and down, and a crankshaft turns that back into rotation."),
+        ("r_intro", "No pistons. No valves. Just a spinning triangle! This is the rotary engine.", 1.05),
+        ("r_piston", "A normal engine slams pistons up and down, and a crankshaft turns that into rotation."),
         ("r_parts", "A rotary skips all that. A triangular rotor spins inside an oval-shaped housing, called an epitrochoid."),
-        ("r_seals", "Each tip carries an apex seal that slides along the wall, splitting the space into three sealed chambers."),
-        ("r_intake", "As a chamber grows, it pulls in air and fuel through the intake port."),
-        ("r_compress", "Then it shrinks, squeezing the mixture tight against the housing."),
-        ("r_power", "Two spark plugs fire, and the burning gas shoves the rotor around."),
-        ("r_exhaust", "Finally, the chamber sweeps past the exhaust port and pushes out the burnt gas."),
-        ("r_all", "All three chambers are always busy, so there's a power stroke on every turn of the shaft."),
-        ("r_shaft", "The rotor rides on an eccentric shaft, which spins three times for every single rotor turn."),
-        ("r_gears", "A fixed gear, meshing with a ring gear inside the rotor, keeps the two perfectly in sync."),
-        ("r_pros", "Fewer moving parts, silky smooth, and big power from a tiny package."),
-        ("r_cons", "The catch? Apex seals wear out, and it drinks fuel and oil."),
-        ("r_outro", "No pistons, just spin. That's the rotary engine."),
+        ("r_seals", "Apex seals on each tip slide along the wall, splitting it into three sealed chambers."),
+        ("r_intake", "A chamber grows... and pulls in air and fuel through the intake port."),
+        ("r_compress", "Then it shrinks, squeezing that mixture tight."),
+        ("r_power", "The spark plugs fire, and the blast shoves the rotor around!"),
+        ("r_exhaust", "Then it sweeps past the exhaust port and pushes the burnt gas out."),
+        ("r_all", "All three chambers work at once, so there's a power stroke on every turn of the shaft."),
+        ("r_shaft", "The rotor rides on an eccentric shaft that spins three times for every one turn of the rotor."),
+        ("r_gears", "And a fixed gear inside keeps the two perfectly in sync."),
+        ("r_pros", "Fewer moving parts, silky smooth, and big power from a tiny package!"),
+        ("r_cons", "The catch? Apex seals wear, and it's thirsty for fuel and oil."),
+        ("r_outro", "No pistons... just spin. That's the rotary!"),
+        ("cta", "So what's next? Two-stroke engines, or the boxer engine? Tell me in the comments!", 1.1),
     ],
     "vtec": [
-        ("v_intro", "Every engine has to breathe. The camshaft decides exactly when, and how much."),
-        ("v_cam", "It's a spinning shaft covered in egg-shaped lobes. As each lobe comes around, it pushes a valve open."),
-        ("v_spring", "Then a stiff spring snaps the valve shut again, thousands of times a minute."),
-        ("v_belt", "A timing belt links it to the crankshaft, so the cam turns once for every two turns of the crank."),
-        ("v_profile", "The lobe's shape sets the valve timing, lift, and duration. How early, how far, and how long it opens."),
-        ("v_tradeoff", "Here's the problem. A mild cam is smooth and efficient down low, but runs out of breath up high. A wild cam is the opposite."),
-        ("v_vtec", "Honda's VTEC gives you both. Each pair of valves gets two mild lobes, plus one aggressive lobe in the middle."),
-        ("v_low", "At low RPM, the middle rocker arm just floats on its own spring, doing nothing."),
-        ("v_engage", "Past about fifty-five hundred RPM, oil pressure shoves a pin through all three rocker arms, locking them together."),
-        ("v_high", "Now both valves follow the big lobe. More lift, longer duration, and a second wind of power."),
-        ("v_outro", "That's VTEC. Two engines in one."),
+        ("v_intro", "Every engine has to breathe. And the camshaft decides exactly when!", 1.05),
+        ("v_cam", "It's a spinning shaft with egg-shaped lobes. Each lobe that comes around pushes a valve open."),
+        ("v_spring", "Then a stiff spring snaps it shut again... thousands of times a minute!"),
+        ("v_belt", "A timing belt links it to the crank, so the cam turns once for every two crank turns."),
+        ("v_profile", "The lobe's shape sets everything. How early the valve opens, how far, and how long."),
+        ("v_tradeoff", "Here's the problem. A mild cam is smooth down low, but runs out of breath up high. A wild cam is the opposite."),
+        ("v_vtec", "Honda's VTEC gives you both! Each pair of valves gets two mild lobes, plus one wild lobe in the middle."),
+        ("v_low", "At low RPM, the middle rocker just floats on its own spring, doing nothing."),
+        ("v_engage", "Then, around fifty-five hundred RPM on many engines, oil pressure shoves pins through all three rockers... locking them together!", 1.05),
+        ("v_high", "Now both valves ride the wild lobe. More lift, longer duration, and a second wind of power!"),
+        ("v_outro", "That's VTEC. Two cam profiles in one engine."),
+        ("cta", "So what should we break down next? Variable valve timing, or dual-clutch gearboxes? Tell me in the comments!", 1.1),
     ],
 }
 
-VOICE = "am_michael"
-SPEED = 1.08
+# am_fenrir measured ~2x the pitch range of am_michael on the same text (more expressive)
+VOICE = "am_fenrir"
+SPEED = 1.04
 # Spoken words -> how they appear in the captions (merged into one token).
-CAPTION_MERGE = {"one hundred fifty thousand": "150,000", "fifty-five hundred": "5,500"}
-GAP = 0.25  # seconds of silence between lines
+CAPTION_MERGE = {"one hundred fifty thousand": "150,000", "fifty-five hundred": "5,500", "seven hundred": "700", "a hundred thousand": "100,000"}
+GAP = 0.3  # seconds of silence between lines
 LEAD_IN = 0.35
 
 
@@ -159,8 +167,10 @@ def main():
     chunks = [np.zeros(int(LEAD_IN * sr), dtype=np.float32)]
     t = LEAD_IN
     lines = []
-    for scene, text in SCRIPTS[args.story]:
-        audio, sr = kokoro.create(text, voice=VOICE, speed=SPEED, lang="en-us")
+    for entry in SCRIPTS[args.story]:
+        scene, text = entry[0], entry[1]
+        mult = entry[2] if len(entry) > 2 else 1.0
+        audio, sr = kokoro.create(text, voice=VOICE, speed=SPEED * mult, lang="en-us")
         audio = audio.astype(np.float32)
         # trim leading/trailing near-silence so timings are tight
         idx = np.where(np.abs(audio) > 0.01)[0]

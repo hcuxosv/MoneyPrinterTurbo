@@ -2,6 +2,7 @@
 //
 //   node render.mjs --build <dir with voice.wav + timeline.json> --out turbo.mp4 [--fps 30]
 //   node render.mjs --build <dir> --stills 2,8,15     (preview PNGs only)
+//   node render.mjs --build <dir> --stills 9 --clean  (bare 3D frame, no overlays)
 //
 // <build>/node_modules/three must exist (npm i three@0.170.0 in that dir).
 import { createRequire } from 'node:module';
@@ -41,6 +42,8 @@ await page.goto(`http://127.0.0.1:${port}/scene.html`);
 await page.waitForFunction(() => window.ready === true, null, { timeout: 120000 });
 await page.evaluate(() => document.fonts.ready);
 const duration = await page.evaluate(() => window.duration);
+// --clean: hide all 2D overlays (captions, labels, HUD) to grab a bare 3D frame for thumbnails
+if (args.clean) await page.addStyleTag({ content: '#ui { display: none !important; }' });
 
 if (args.stills) {
   const times = String(args.stills).split(',').map(Number);

@@ -30,4 +30,5 @@ ln -sfn ../node_modules "$BUILD/node_modules"
 
 python3 voiceover.py --story "$STORY" --models "$MODELS" --out "$BUILD"
 node render.mjs --build "$BUILD" --out "$ROOT/$NAME.mp4"
-echo "Done: $ROOT/$NAME.mp4"
+python3 thumbnails.py --build "$ROOT" --out "$ROOT" --stories "$STORY"
+echo "Done: $ROOT/$NAME.mp4 (+ thumbnail)"

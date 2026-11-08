@@ -62,6 +62,22 @@
     font-weight: 900; font-size: 130px; color: #ffd21f; letter-spacing: -4px; font-style: italic;
     -webkit-text-stroke: 12px #c4161c; paint-order: stroke fill; text-shadow: 0 0 60px rgba(255,80,30,.9);
   }
+  #ctaDim { position: absolute; inset: 0; background: #05070b; opacity: 0; z-index: 1; }
+  #title, #cta, #caption { z-index: 2; }
+  #cta { position: absolute; left: 70px; right: 70px; top: 470px; opacity: 0; }
+  #cta .opt {
+    display: flex; align-items: center; gap: 30px; margin-bottom: 44px; padding: 34px 40px; border-radius: 40px;
+    background: rgba(16,22,34,.92); border: 5px solid #ffb020; box-shadow: 0 0 50px rgba(255,176,32,.35);
+    color: #fff; font-weight: 900; font-size: 62px; line-height: 1.05; letter-spacing: -1px; opacity: 0;
+  }
+  #cta #ctaOpt1 { border-color: #46b6ff; box-shadow: 0 0 50px rgba(70,182,255,.35); }
+  #cta .badge {
+    flex: none; width: 110px; height: 110px; border-radius: 50%; background: #ffb020; color: #0b0f16;
+    display: flex; align-items: center; justify-content: center; font-size: 74px;
+  }
+  #cta #ctaOpt1 .badge { background: #46b6ff; }
+  #ctaAsk { text-align: center; margin-top: 30px; color: #fff; font-weight: 900; font-size: 84px; letter-spacing: -1px; opacity: 0; }
+  #ctaAsk span { color: #ffd21f; }
   #progress { position: absolute; left: 0; bottom: 0; height: 12px; background: #ffb020; width: 0; }
 </style>
 <script type="importmap">
@@ -101,7 +117,13 @@
     <g id="gnDURATION" opacity="0"><line x1="46" y1="232" x2="285" y2="232" stroke="#4dff88" stroke-width="5"/><path d="M46 232 l14 -9 v18 Z M285 232 l-14 -9 v18 Z" fill="#4dff88"/><text x="300" y="240" fill="#4dff88" font-family="Inter" font-weight="900" font-size="26">HOW LONG</text></g>
   </svg>
   <div id="vtecflash">VTEC<br>ENGAGED!</div>
+  <div id="ctaDim"></div>
   <div id="labels"></div>
+  <div id="cta">
+    <div class="opt" id="ctaOpt0"><span class="badge">A</span><span class="txt"></span></div>
+    <div class="opt" id="ctaOpt1"><span class="badge">B</span><span class="txt"></span></div>
+    <div id="ctaAsk">COMMENT <span>A</span> OR <span>B</span> &darr;</div>
+  </div>
   <div id="wipe"></div>
   <div id="wipetext"></div>
   <div id="caption"></div>
@@ -1228,8 +1250,8 @@ const stories = {
         st.labels = ['free', 'canLag']; st.labelOp = { canLag: smooth(since(wordTime(si, 'but')) / 0.25) };
       }
       if (is('verdict')) {
-        const tW = wordTime(si, 'which');
-        st.title = 'WHICH WOULD<br>YOU <span>PICK?</span>'; st.titleOp = smooth(since(tW) / 0.35);
+        const tW = wordTime(si, 'some');
+        st.title = 'SOME CARS<br>RUN <span>BOTH!</span>'; st.titleOp = smooth(since(tW) / 0.35);
         st.labels = ['vSc', 'vTurbo'];
         st.labelOp = { vSc: since(wordTime(si, 'turbo') - 0.1) < 0 ? smooth(since(sceneStart + 0.6) / 0.3) : 0,
                        vTurbo: since(wordTime(si, 'turbo') - 0.1) >= 0 && since(tW) < 0 ? smooth(since(wordTime(si, 'turbo') + 0.1) / 0.3) : 0 };
@@ -1313,7 +1335,7 @@ const stories = {
       }
       if (is('r_cons')) {
         st.sealRed = smooth(since(wordTime(si, 'apex')) / 0.3); st.labels = ['cSeal', 'cThirst'];
-        st.labelOp = { cSeal: st.sealRed, cThirst: smooth(since(wordTime(si, 'drinks')) / 0.25) };
+        st.labelOp = { cSeal: st.sealRed, cThirst: smooth(since(wordTime(si, 'thirsty')) / 0.25) };
       }
       if (is('r_outro')) { st.title = "THAT'S THE<br><span>ROTARY</span>"; st.titleOp = smooth(since(wordTime(si, "that's")) / 0.4); }
       return st;
@@ -1374,9 +1396,9 @@ const stories = {
       }
       if (is('v_vtec')) {
         st.labels = ['mildA', 'wildL', 'mildB'];
-        st.labelOp = { mildA: smooth(since(wordTime(si, 'mild')) / 0.3), mildB: smooth(since(wordTime(si, 'mild')) / 0.3), wildL: smooth(since(wordTime(si, 'aggressive')) / 0.3) };
+        st.labelOp = { mildA: smooth(since(wordTime(si, 'mild')) / 0.3), mildB: smooth(since(wordTime(si, 'mild')) / 0.3), wildL: smooth(since(wordTime(si, 'wild')) / 0.3) };
         st.lobeGlow = 0.5 * smooth(since(wordTime(si, 'mild')) / 0.3);
-        st.wildGlow = 0.6 * smooth(since(wordTime(si, 'aggressive')) / 0.3);
+        st.wildGlow = 0.6 * smooth(since(wordTime(si, 'wild')) / 0.3);
         st.title = "HONDA <span>VTEC</span>"; st.titleOp = smooth(since(sceneStart + 0.2) / 0.3) * (1 - smooth(since(wordTime(si, 'each')) / 0.3));
       }
       if (is('v_low')) {
@@ -1393,7 +1415,7 @@ const stories = {
         st.vtecFlash = since(tLock) > 0 ? Math.max(0, 1 - since(tLock) / 1.4) : 0;
         if (st.vtecFlash > 0) st.labelOp = { oilL: st.oil * (1 - st.vtecFlash), pinL: 1 - st.vtecFlash };
       }
-      if (is('v_high', 'v_outro')) { st.engage = 1; st.oil = 0.6; st.graphHigh = 1; }
+      if (is('v_high', 'v_outro', 'cta')) { st.engage = 1; st.oil = 0.6; st.graphHigh = 1; }
       if (is('v_high')) {
         st.rpm = lerp(6200, 8200, smooth(local * 1.2)); st.rpmOp = 1; st.wildGlow = 0.4;
         st.graphTag = 'VTEC: BOTH VALVES ON THE WILD LOBE'; st.graphTop = 360;
@@ -1405,6 +1427,18 @@ const stories = {
 };
 const story = stories[timeline.story || 'turbo'];
 const shots = story.shots;
+// end card: ask viewers to pick the next topic (drives comments)
+const CTA = {
+  turbo:  [['DIESEL VS GAS', 'diesel'], ['HOW A DIFFERENTIAL WORKS', 'differential']],
+  lag:    [['SEQUENTIAL TURBOS', 'sequential'], ['ELECTRIC TURBOS', 'electric']],
+  sc:     [['TWINCHARGING', 'twincharging'], ['CENTRIFUGAL SUPERCHARGERS', 'centrifugal']],
+  rotary: [['TWO-STROKE ENGINES', 'two-stroke'], ['BOXER ENGINES', 'boxer']],
+  vtec:   [['VARIABLE VALVE TIMING', 'variable'], ['DUAL-CLUTCH GEARBOXES', 'dual-clutch']],
+}[timeline.story || 'turbo'];
+if (!shots.cta) {
+  const last = lines.length > 1 ? lines[lines.length - 2].scene : lines[0].scene;
+  shots.cta = { ...shots[last], orbit: 0.45 };
+}
 
 function sceneAt(t) {
   let idx = 0;
@@ -1466,6 +1500,22 @@ window.renderAt = function (t) {
   const sceneStart = ln.s - 0.25, sceneLen = (lines[si + 1] ? lines[si + 1].s - 0.25 : timeline.duration) - sceneStart;
   const local = clamp((t - sceneStart) / sceneLen);
   S = { ...DEFAULT_STATE, ...story.state(name, { t, sceneStart, sceneLen, local, si }) };
+  const ctaEl = document.getElementById('cta');
+  if (name === 'cta' && CTA) {
+    const since = (x) => t - x;
+    S.title = 'WHAT SHOULD WE<br>BREAK DOWN <span>NEXT?</span>'; S.titleTop = 150; S.titleOp = smooth(since(sceneStart + 0.1) / 0.35);
+    S.labels = []; S.boostOp = 0; S.throttleOp = 0; S.rpmOp = 0; S.graphOp = 0;
+    ctaEl.style.opacity = 1;
+    document.getElementById('ctaDim').style.opacity = 0.55 * smooth(since(sceneStart) / 0.4);
+    CTA.forEach(([label, word], k) => {
+      const el = document.getElementById('ctaOpt' + k), on = smooth(since(wordTime(si, word) - 0.1) / 0.3);
+      el.querySelector('.txt').textContent = label;
+      el.style.opacity = on; el.style.transform = `translateX(${(1 - on) * (k ? 80 : -80)}px) scale(${0.9 + 0.1 * on})`;
+    });
+    const c = smooth(since(wordTime(si, 'comment') - 0.1) / 0.3);
+    const ask = document.getElementById('ctaAsk');
+    ask.style.opacity = c; ask.style.transform = `scale(${0.85 + 0.15 * c + 0.04 * Math.sin(t * 8) * c})`;
+  } else { ctaEl.style.opacity = 0; document.getElementById('ctaDim').style.opacity = 0; }
   // turbo / supercharger setup switch, hidden behind a wipe
   const mode = modeAt(t);
   scAssy.visible = mode === 'sc';
