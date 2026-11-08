@@ -57,24 +57,41 @@ if (args.stills) {
 } else {
   const out = path.resolve(args.out || path.join(build, 'turbo.mp4'));
   const nFrames = Math.ceil(duration * fps);
-  const ff = spawn('ffmpeg', ['-y', '-loglevel', 'error',
-    '-f', 'image2pipe', '-framerate', String(fps), '-c:v', 'mjpeg', '-i', '-',
-    '-i', path.join(build, 'voice.wav'),
-    '-c:v', 'libx264', '-preset', 'medium', '-crf', '20', '-pix_fmt', 'yuv420p', '-r', String(fps),
-    '-c:a', 'aac', '-b:a', '192k', '-af', 'loudnorm=I=-14:TP=-1.5:LRA=11',
-    '-movflags', '+faststart', '-shortest', out], { stdio: ['pipe', 'inherit', 'inherit'] });
+  // Render in resumable chunks: each chunk is its own video-only file, renamed into
+  // place only when complete, so an interrupted render picks up where it stopped.
+  const CHUNK = 300;
+  const segDir = path.join(build, 'segments');
+  fs.mkdirSync(segDir, { recursive: true });
   const t0 = Date.now();
-  for (let i = 0; i < nFrames; i++) {
-    await page.evaluate(t => window.renderAt(t), i / fps);
-    const buf = await page.screenshot({ type: 'jpeg', quality: 92 });
-    if (!ff.stdin.write(buf)) await new Promise(r => ff.stdin.once('drain', r));
-    if (i % 60 === 0) {
-      const el = (Date.now() - t0) / 1000;
-      console.log(`frame ${i}/${nFrames}  ${el.toFixed(0)}s elapsed, eta ${((nFrames - i) * el / Math.max(1, i)).toFixed(0)}s`);
+  const segs = [];
+  for (let c = 0; c * CHUNK < nFrames; c++) {
+    const seg = path.join(segDir, `seg_${String(c).padStart(3, '0')}_${fps}.mp4`);
+    segs.push(seg);
+    if (fs.existsSync(seg)) { console.log('skip', path.basename(seg)); continue; }
+    const tmp = seg + '.part.mp4';
+    const ff = spawn('ffmpeg', ['-y', '-loglevel', 'error',
+      '-f', 'image2pipe', '-framerate', String(fps), '-c:v', 'mjpeg', '-i', '-',
+      '-c:v', 'libx264', '-preset', 'medium', '-crf', '20', '-pix_fmt', 'yuv420p', '-r', String(fps), tmp],
+      { stdio: ['pipe', 'inherit', 'inherit'] });
+    for (let i = c * CHUNK; i < Math.min(nFrames, (c + 1) * CHUNK); i++) {
+      // step from the previous frame so time-integrated state matches a continuous render
+      if (i === c * CHUNK && i > 0) await page.evaluate(t => window.renderAt(t), (i - 1) / fps);
+      await page.evaluate(t => window.renderAt(t), i / fps);
+      const buf = await page.screenshot({ type: 'jpeg', quality: 92 });
+      if (!ff.stdin.write(buf)) await new Promise(r => ff.stdin.once('drain', r));
+      if (i % 60 === 0) console.log(`frame ${i}/${nFrames}  ${((Date.now() - t0) / 1000).toFixed(0)}s elapsed`);
     }
+    ff.stdin.end();
+    await new Promise(r => ff.on('close', r));
+    fs.renameSync(tmp, seg);
   }
-  ff.stdin.end();
-  await new Promise(r => ff.on('close', r));
+  const list = path.join(segDir, 'list.txt');
+  fs.writeFileSync(list, segs.map(f => `file '${f}'`).join('\n'));
+  await new Promise((res, rej) => spawn('ffmpeg', ['-y', '-loglevel', 'error',
+    '-f', 'concat', '-safe', '0', '-i', list, '-i', path.join(build, 'voice.wav'),
+    '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-af', 'loudnorm=I=-14:TP=-1.5:LRA=11',
+    '-movflags', '+faststart', '-shortest', out], { stdio: 'inherit' })
+    .on('close', code => code ? rej(new Error('ffmpeg mux failed')) : res()));
   console.log('wrote', out);
 }
 await browser.close();
