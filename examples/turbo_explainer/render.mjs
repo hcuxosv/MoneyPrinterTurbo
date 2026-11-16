@@ -89,7 +89,7 @@ if (args.stills) {
   fs.writeFileSync(list, segs.map(f => `file '${f}'`).join('\n'));
   await new Promise((res, rej) => spawn('ffmpeg', ['-y', '-loglevel', 'error',
     '-f', 'concat', '-safe', '0', '-i', list, '-i', path.join(build, 'voice.wav'),
-    '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-af', 'loudnorm=I=-14:TP=-1.5:LRA=11',
+    '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-af', 'loudnorm=I=-14:TP=-1.5:LRA=11',
     '-movflags', '+faststart', '-shortest', out], { stdio: 'inherit' })
     .on('close', code => code ? rej(new Error('ffmpeg mux failed')) : res()));
   console.log('wrote', out);
